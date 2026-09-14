@@ -1,150 +1,592 @@
 # 🛡️ SentinelX
 
-### Intelligent Security Operations & Incident Response Dashboard
+## Intelligent Campus Safety & Risk Analytics Platform
 
-SentinelX is a modern **Security Operations Center (SOC) dashboard** designed to help security teams monitor alerts, investigate incidents, visualize organizational risk, analyze security trends, and maintain an auditable incident-response workflow.
+SentinelX is a modern, industry-style Security Operations and Campus Safety dashboard built to centralize incident reporting, security alerts, risk visualization, analytics, ML-assisted insights, user access control, and auditable incident-response workflows.
 
-The platform combines a centralized security dashboard with **incident management, risk visualization, analytics, ML-driven insights, alerts, and audit tracking** in a single interface.
+The current release is a **frontend-focused functional prototype** built with React, TypeScript, Vite, Tailwind CSS, and Recharts. It uses structured mock data while implementing realistic dashboard interactions, role-based views, incident workflows, alert actions, session controls, an AI assistant, ML insight visualizations, and a tamper-evident audit-chain interface.
 
-> **SentinelX is currently a frontend-focused prototype using structured mock security data, with a roadmap toward real-time SIEM integration, backend services, machine learning pipelines, and cryptographic audit verification.**
-
----
-
-## 🚀 Key Features
-
-### 📊 Security Dashboard
-
-* Centralized security operations overview
-* Active incident monitoring
-* Security alert statistics
-* Risk indicators
-* Incident severity distribution
-* Security activity summaries
-* Real-time-style dashboard experience
-
-### 🚨 Incident Management
-
-* View and track security incidents
-* Severity classification
-* Incident status tracking
-* Analyst assignment
-* Incident investigation workflow
-* Incident metadata and timelines
-
-### 🗺️ Risk Map
-
-* Visual representation of security risks
-* Geographic risk monitoring
-* High-risk location identification
-* Security-event visualization
-
-### 📈 Security Analytics
-
-* Incident trends
-* Alert statistics
-* Risk analysis
-* Security activity patterns
-* Interactive charts and visualizations
-
-### 🔔 Alert Management
-
-* Centralized security alerts
-* Alert severity classification
-* Alert status monitoring
-* Security-event overview
-
-### 🤖 ML Insights
-
-Designed as the foundation for future machine-learning-powered security analysis.
-
-Planned capabilities include:
-
-* Anomaly detection
-* Threat classification
-* Risk prediction
-* Incident prioritization
-* Suspicious activity detection
-* Security trend forecasting
-
-### 🔐 Audit Trail
-
-SentinelX includes an audit-focused interface designed for future integration with **tamper-evident security records and cryptographic verification**.
-
-Future implementations can provide:
-
-* Hash-based audit records
-* Event integrity verification
-* Tamper detection
-* Immutable audit history
-* Cryptographic chain-of-custody
-
-### 👥 User Management
-
-Role-based users are supported in the current prototype, including:
-
-* Administrator
-* Security Officer
-* Analyst
-* Staff
-* Student
-
-### ⚙️ Settings
-
-Centralized application configuration and user settings.
+> **Important:** SentinelX currently demonstrates the product and workflow layer. Backend APIs, Oracle persistence, production authentication, real SIEM ingestion, and production ML inference remain future integration layers.
 
 ---
 
-# 🏗️ System Architecture
+## ✨ What's Implemented
+
+This version is significantly beyond a static dashboard. The current build includes:
+
+- Role-based access and navigation
+- Five user roles
+- Functional incident reporting
+- Incident search and multi-filtering
+- Incident status updates
+- Incident assignment/reassignment
+- Incident comments and investigation timeline
+- CSV incident export
+- Live-style alert generation
+- Alert acknowledgement
+- Alert escalation
+- Alert dismissal with mandatory reason
+- Configurable alert-rule interface
+- Campus risk heatmap
+- Risk-zone filtering and replay controls
+- Analytics dashboard with interactive charts
+- ML model comparison
+- Anomaly detection interface
+- SHAP-style feature-importance explanations
+- Permission-aware SentinelX AI assistant
+- Tamper-evident audit hash-chain visualization
+- Audit-chain integrity verification
+- Audit filtering and inspection
+- Automatic audit logging for important actions
+- Session inactivity lock
+- Session countdown
+- Demo session unlock
+- Toast notifications
+- User management interface
+- Role permission matrix
+- User invitation interface
+- System settings
+- SLA configuration
+- ML/risk configuration controls
+- Notification settings
+- OAuth/security settings interface
+- System-health monitoring interface
+- Dedicated Student "My Reports" experience
+- Responsive dark SOC-style interface
+
+---
+
+# 🚀 Core Modules
+
+## 1. 📊 Security Dashboard
+
+The main dashboard provides a centralized security overview.
+
+### Current capabilities
+
+- Open incident count
+- Critical incident count
+- Active alert count
+- Campus risk score
+- Top risk locations
+- Incident activity
+- Security summaries
+- Role-specific dashboard experience
+
+Students receive a simplified dashboard focused on their own reports.
+
+---
+
+## 2. 🚨 Incident Management
+
+SentinelX includes a complete frontend incident workflow.
+
+### Incident information
+
+Each incident can contain:
+
+- Incident ID
+- Incident type
+- Description
+- Location
+- Severity
+- Reporter
+- Reporter email
+- Assigned personnel
+- Status
+- Timestamp
+- Risk score
+- Evidence/reference
+- Investigation timeline
+- Comments
+
+### Incident statuses
 
 ```text
-                         ┌──────────────────────┐
-                         │      SentinelX       │
-                         │   Security Dashboard │
-                         └──────────┬───────────┘
-                                    │
-             ┌──────────────────────┼──────────────────────┐
-             │                      │                      │
-             ▼                      ▼                      ▼
-      ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-      │   Alerts    │       │  Incidents  │       │  Risk Map   │
-      └─────────────┘       └─────────────┘       └─────────────┘
-             │                      │                      │
-             └──────────────────────┼──────────────────────┘
-                                    │
-                                    ▼
-                           ┌─────────────────┐
-                           │    Analytics    │
-                           └────────┬────────┘
-                                    │
-                         ┌──────────┴──────────┐
-                         ▼                     ▼
-                  ┌─────────────┐       ┌─────────────┐
-                  │ ML Insights │       │ Audit Trail │
-                  └─────────────┘       └─────────────┘
-                                   
-                         Future Backend Layer
-                                    │
-             ┌──────────────────────┼──────────────────────┐
-             ▼                      ▼                      ▼
-        ┌──────────┐           ┌──────────┐          ┌──────────┐
-        │   SIEM   │           │ Database │          │ ML Model │
-        └──────────┘           └──────────┘          └──────────┘
+Open
+Investigating
+Escalated
+Resolved
+Closed
+```
+
+### Implemented actions
+
+- Report a new incident
+- Search incidents
+- Filter by type
+- Filter by severity
+- Filter by status
+- Filter by location
+- Filter by date range
+- View incident details
+- Change incident status
+- Reassign incidents
+- Add investigation comments
+- Export filtered incidents as CSV
+
+---
+
+## 3. ⚠️ Alert Management
+
+SentinelX includes a centralized alert-management workflow.
+
+### Alert statuses
+
+```text
+Active
+Acknowledged
+Dismissed
+Resolved
+```
+
+### Implemented actions
+
+Authorized users can:
+
+- Acknowledge alerts
+- Escalate alerts
+- Dismiss alerts
+- Provide a dismissal reason
+- View alert details
+
+Important alert actions automatically generate audit records.
+
+### Current alert rules
+
+The interface includes rules for:
+
+- Critical incident → immediate escalation
+- Repeated location → elevated risk
+- SLA exceeded → escalation
+- ML anomaly cluster → alert generation
+- High-risk zone monitoring
+
+Some rules are currently represented as configurable prototype logic/UI rather than a production event-processing engine.
+
+---
+
+# 🗺️ Risk Map
+
+The Risk Map provides a visual campus threat overview.
+
+### Current capabilities
+
+- Campus risk zones
+- Risk score visualization
+- Incident density
+- Critical/High/Moderate/Low zones
+- Location details
+- Risk trends
+- Recommended actions
+- Location-based filtering
+- Incident-type filtering
+- Severity filtering
+- Date/replay controls
+- Historical risk-style visualization
+
+The map is currently a frontend visualization based on structured campus risk data.
+
+---
+
+# 📈 Security Analytics
+
+The Analytics module provides security intelligence through interactive charts.
+
+### Current analytics
+
+- 10-day incident volume
+- Incidents by hour
+- Incident type distribution
+- Average resolution time
+- SLA targets
+- Location risk analysis
+- Incident trends
+- Risk distribution
+
+The analytics layer is designed so that the current mock datasets can later be replaced with database/API data.
+
+---
+
+# 🤖 ML Insights
+
+SentinelX includes an ML-oriented decision-support interface.
+
+### Current model views
+
+- Random Forest
+- XGBoost
+- Logistic Regression
+- Isolation Forest
+
+### Current evaluation display
+
+The prototype visualizes:
+
+- Accuracy
+- Precision
+- Recall
+- F1-score
+- AUC-ROC
+- Model comparison
+- Training-set size
+- Model version
+- Model status
+
+### Current anomaly interface
+
+Detected insights can be expanded to show:
+
+- Prediction type
+- Confidence score
+- Location
+- Model used
+- Explanation
+- SHAP-style feature importance
+
+### Responsible AI
+
+ML outputs are explicitly presented as:
+
+> **Risk indicators for decision support, not certainties.**
+
+They are not intended to establish culpability or make deterministic claims about crime or individual behavior.
+
+The current ML page is a **prototype visualization using structured data**, not a live production inference pipeline.
+
+---
+
+# 🧠 SentinelX AI Assistant
+
+SentinelX includes a built-in AI-assistant interface for security-data queries.
+
+The assistant can answer supported questions such as:
+
+```text
+Show high-risk locations this week.
+Which incident type increased the most?
+Which unresolved incidents exceeded SLA?
+How many critical incidents are there?
+Show active alerts.
+```
+
+### Permission awareness
+
+The assistant checks the current user's role and authorized pages before returning protected categories of information.
+
+This establishes the foundation for a future backend-connected AI assistant with database-level authorization.
+
+> The current assistant uses predefined application logic and structured data. It is not yet connected to an external LLM or production database.
+
+---
+
+# 🔐 Audit Trail
+
+One of the major SentinelX features is the audit-trail interface.
+
+Important actions generate audit records containing information such as:
+
+- Audit ID
+- User
+- Action
+- Entity
+- Previous value
+- New value
+- Timestamp
+- IP/reference
+- Hash
+- Previous hash
+
+### Current audit events include
+
+```text
+INCIDENT_CREATED
+INCIDENT_STATUS_CHANGED
+INCIDENT_ASSIGNED
+ALERT_GENERATED
+ALERT_ACKNOWLEDGED
+ALERT_DISMISSED
+USER_ROLE_MODIFIED
+ML_PREDICTION_STORED
+```
+
+### Hash-chain visualization
+
+The audit interface links each record to the previous hash:
+
+```text
+Audit Record 1
+      ↓
+Hash 1
+      ↓
+Audit Record 2 + Previous Hash
+      ↓
+Hash 2
+      ↓
+Audit Record 3 + Previous Hash
+      ↓
+Tamper-Evident Chain
+```
+
+The interface includes a **Verify Chain Integrity** action that checks the relationship between stored hashes.
+
+### Current limitation
+
+The frontend prototype generates demonstration hash values locally. It is **not yet a production SHA-256 cryptographic ledger**.
+
+Future backend implementation can replace this with:
+
+- SHA-256 hashing
+- Server-side verification
+- Digital signatures
+- Immutable storage
+- Cryptographic chain-of-custody
+- Secure audit retention
+
+---
+
+# 👥 Role-Based Access Control
+
+SentinelX currently defines five roles:
+
+| Role | Main Access |
+|---|---|
+| Administrator | Full platform access |
+| Security Officer | Incidents, alerts, risk monitoring, audit |
+| Analyst | Analytics, ML, risk monitoring, incidents |
+| Staff | Dashboard, incidents, alerts |
+| Student | Dashboard and personal incident reports |
+
+### Administrator
+
+Access to:
+
+- Dashboard
+- Incidents
+- Risk Map
+- Analytics
+- Alerts
+- ML Insights
+- Audit Trail
+- User Management
+- Settings
+
+### Security Officer
+
+Access to:
+
+- Dashboard
+- Incident Management
+- Risk Map
+- Alerts
+- Audit Trail
+
+### Analyst
+
+Access to:
+
+- Dashboard
+- Analytics
+- ML Insights
+- Risk Map
+- Incidents
+
+### Staff
+
+Access to:
+
+- Dashboard
+- Incidents
+- Alerts
+
+### Student
+
+Access to:
+
+- Dashboard
+- My Reports
+
+The current role system is implemented at the frontend/application level. Server-side authorization is a planned backend feature.
+
+---
+
+# 🔑 Authentication & Session Security
+
+The current prototype provides a role-based demonstration sign-in flow.
+
+### Demo accounts
+
+| Role | Account |
+|---|---|
+| Administrator | p.sharma@campus.edu |
+| Security Officer | k.nair@campus.edu |
+| Analyst | m.iyer@campus.edu |
+| Staff | r.verma@campus.edu |
+| Student | a.gupta@campus.edu |
+
+The login screen presents a Google-style authentication flow for demonstration purposes.
+
+### Session controls
+
+SentinelX currently implements:
+
+- 15-minute inactivity timeout
+- Session countdown
+- Automatic session lock
+- Activity-based timer reset
+- Session unlock screen
+- Logout flow
+- Access auditing UI
+
+> Authentication is currently a frontend prototype. Password hashing, JWT/session validation, real Google OAuth verification, and server-side authentication are future backend responsibilities.
+
+---
+
+# 🔔 Toast & Notification System
+
+SentinelX includes an application-wide notification system for important events.
+
+Examples:
+
+- Incident created
+- Incident updated
+- Incident reassigned
+- Alert acknowledged
+- Alert escalated
+- Alert dismissed
+- New simulated alert
+- Configuration saved
+- Validation errors
+
+Notifications automatically disappear after a short period and can be dismissed manually.
+
+---
+
+# 👤 User Management
+
+Administrators have a dedicated User Management interface.
+
+### Current capabilities
+
+- View users
+- Filter by role
+- View account status
+- View user ID
+- View last login
+- View incident count
+- Edit user interface
+- Suspend user interface
+- Invite users
+- Google OAuth invitation option
+- Role permission matrix
+
+The current module is designed as the frontend foundation for a production identity and authorization service.
+
+---
+
+# ⚙️ System Settings
+
+The Settings module provides centralized platform configuration.
+
+### Current controls
+
+#### SLA Configuration
+
+- High-severity SLA
+- Critical-severity SLA
+
+#### ML & Risk Engine
+
+- Anomaly confidence threshold
+- ML predictions toggle
+- Auto-escalation
+- Retraining schedule interface
+
+#### Notifications
+
+- Email alerts
+- SMS alerts
+
+#### Authentication
+
+- Google OAuth 2.0 status
+- Campus-domain restriction display
+- MFA requirement display
+
+#### System Health
+
+The interface monitors services such as:
+
+- API Gateway
+- Database
+- ML Engine
+
+with status, uptime, and latency indicators.
+
+These are currently prototype configuration/status controls.
+
+---
+
+# 🏗️ Current Architecture
+
+```text
+                    ┌─────────────────────────┐
+                    │       SentinelX         │
+                    │  React Security Portal  │
+                    └────────────┬────────────┘
+                                 │
+        ┌────────────────────────┼────────────────────────┐
+        │                        │                        │
+        ▼                        ▼                        ▼
+   Incidents                  Alerts                  Risk Map
+        │                        │                        │
+        └────────────────────────┼────────────────────────┘
+                                 │
+                                 ▼
+                         Analytics Layer
+                                 │
+                  ┌──────────────┼──────────────┐
+                  ▼              ▼              ▼
+             ML Insights    AI Assistant    Audit Trail
+                                 │
+                                 ▼
+                         Application State
+                                 │
+                                 ▼
+                    Future Backend / REST API
+                                 │
+            ┌────────────────────┼────────────────────┐
+            ▼                    ▼                    ▼
+        Oracle DB             SIEM              ML Service
 ```
 
 ---
 
 # 🧰 Tech Stack
 
-| Technology                   | Purpose                        |
-| ---------------------------- | ------------------------------ |
-| **React 19**                 | Frontend framework             |
-| **TypeScript**               | Type-safe development          |
-| **Vite**                     | Development and build tooling  |
-| **Tailwind CSS v4**          | UI styling                     |
-| **Recharts**                 | Data visualization             |
-| **Google Identity Services** | Optional Google authentication |
-| **Netlify**                  | Deployment                     |
-| **Vercel**                   | Deployment                     |
+| Technology | Purpose |
+|---|---|
+| React 19 | Frontend framework |
+| TypeScript 5.7 | Type-safe development |
+| Vite 8 | Development/build tooling |
+| Tailwind CSS 4 | UI styling |
+| Recharts 3 | Data visualization |
+| Node.js 22+ | Runtime |
+| pnpm 10+ | Package management |
+| Git | Version control |
+
+### Current dependency architecture
+
+The application currently focuses on the frontend and does not yet require:
+
+- FastAPI
+- Oracle Database
+- PostgreSQL
+- External ML service
+- External LLM API
+- SIEM API
+
+Those are planned integration layers.
 
 ---
 
@@ -155,36 +597,47 @@ sentinelx/
 │
 ├── src/
 │   ├── components/
-│   │   ├── Analytics.tsx
+│   │   ├── AIAssistant.tsx
 │   │   ├── Alerts.tsx
+│   │   ├── Analytics.tsx
 │   │   ├── AuditTrail.tsx
 │   │   ├── Dashboard.tsx
 │   │   ├── Incidents.tsx
 │   │   ├── Login.tsx
 │   │   ├── MLInsights.tsx
 │   │   ├── RiskMap.tsx
+│   │   ├── SessionLock.tsx
 │   │   ├── Settings.tsx
 │   │   ├── Sidebar.tsx
+│   │   ├── Toast.tsx
 │   │   └── UserManagement.tsx
+│   │
+│   ├── context/
+│   │   └── AppContext.tsx
 │   │
 │   ├── data/
 │   │   └── mockData.ts
 │   │
-│   ├── lib/
-│   │   └── auth.ts
+│   ├── imports/
+│   │   └── pasted_text/
+│   │       └── sentinelx-platform.md
 │   │
 │   ├── App.tsx
+│   ├── index.css
 │   ├── main.tsx
-│   └── index.css
+│   └── vite-env.d.ts
 │
-├── public/
-├── .env.example
+├── .figma/
+├── .gitignore
+├── .gitattributes
+├── .mise.toml
+├── index.html
 ├── package.json
 ├── pnpm-lock.yaml
-├── netlify.toml
-├── vercel.json
 ├── tsconfig.json
-└── README.md
+├── vite.config.ts
+├── AGENTS.md
+└── CLAUDE.md
 ```
 
 ---
@@ -193,20 +646,19 @@ sentinelx/
 
 ## Prerequisites
 
-Make sure you have:
+Install:
 
-* Node.js 22+
-* pnpm 10+
-* Git
+- Node.js 22+
+- pnpm 10+
+- Git
 
-Check your versions:
+Check versions:
 
 ```bash
 node --version
 pnpm --version
+git --version
 ```
-
----
 
 ## Installation
 
@@ -223,280 +675,37 @@ Install dependencies:
 pnpm install
 ```
 
-Create the environment file:
-
-```bash
-cp .env.example .env
-```
-
 Start the development server:
 
 ```bash
 pnpm dev
 ```
 
-The application will be available through the local Vite development server.
+Open the local Vite development URL shown in the terminal.
 
 ---
 
-# 🔑 Authentication
+# 🏭 Production Build
 
-SentinelX currently supports two authentication paths:
-
-### Demo Authentication
-
-The prototype includes predefined demo accounts for testing different roles.
-
-| Role             | Email                 | Password      |
-| ---------------- | --------------------- | ------------- |
-| Administrator    | `p.sharma@campus.edu` | `admin123`    |
-| Security Officer | `k.nair@campus.edu`   | `security123` |
-| Analyst          | `m.iyer@campus.edu`   | `analyst123`  |
-| Staff            | `a.rao@campus.edu`    | `staff123`    |
-| Student          | `r.verma@campus.edu`  | `student123`  |
-
-> These credentials are for demonstration purposes only and must not be used in a production environment.
-
-### Google Sign-In
-
-Google authentication can be enabled using a Google OAuth Client ID.
-
-Add the following variable to `.env`:
-
-```env
-VITE_GOOGLE_CLIENT_ID=your_google_client_id
-```
-
-Google authentication requires the deployed application's domain to be configured as an authorized JavaScript origin.
-
----
-
-# 📊 Current Data Model
-
-The current version uses structured mock security data.
-
-The architecture is intentionally designed so that mock data can later be replaced with a backend API.
-
-```text
-Mock Data
-    │
-    ▼
-React Components
-    │
-    ▼
-Dashboard / Analytics / Incidents
-    │
-    ▼
-Future REST API
-    │
-    ├── PostgreSQL / Oracle
-    ├── SIEM
-    ├── ML Service
-    └── Cryptographic Audit Service
-```
-
----
-
-# 🔐 Security Architecture — Future Direction
-
-A major goal of SentinelX is to evolve from a dashboard prototype into a complete security monitoring and incident-response platform.
-
-The planned security architecture includes:
-
-### SIEM Integration
-
-Integrate SentinelX with SIEM platforms to ingest:
-
-* Authentication events
-* Network events
-* Endpoint alerts
-* Firewall events
-* IDS/IPS alerts
-* Suspicious activities
-
-### Cryptographic Audit Trail
-
-Security-critical events can be protected using cryptographic hashing.
-
-Example conceptual flow:
-
-```text
-Event 1
-  │
-  ▼
-SHA-256 Hash
-  │
-  ▼
-Event 2 + Previous Hash
-  │
-  ▼
-SHA-256 Hash
-  │
-  ▼
-Event 3 + Previous Hash
-  │
-  ▼
-Tamper-Evident Chain
-```
-
-If an historical event is modified, subsequent hash verification can detect the change.
-
-### Role-Based Access Control
-
-Future backend authorization can enforce permissions based on:
-
-```text
-Administrator
-      │
-      ├── User Management
-      ├── Security Configuration
-      └── Full Audit Access
-
-Security Officer
-      │
-      ├── Incident Management
-      └── Security Monitoring
-
-Analyst
-      │
-      ├── Investigation
-      ├── Analytics
-      └── ML Insights
-
-Staff / Student
-      │
-      └── Limited Access
-```
-
----
-
-# 🤖 Machine Learning Roadmap
-
-The ML module is intended to become one of the core intelligence layers of SentinelX.
-
-Potential models include:
-
-### Anomaly Detection
-
-Detect unusual behavior in:
-
-* Login activity
-* Network traffic
-* User behavior
-* System events
-
-### Threat Classification
-
-Automatically classify alerts into categories such as:
-
-```text
-Malware
-Phishing
-Brute Force
-DDoS
-Unauthorized Access
-Data Exfiltration
-Insider Threat
-Suspicious Activity
-```
-
-### Risk Prediction
-
-Generate a dynamic risk score based on:
-
-```text
-Threat Severity
-       +
-Asset Criticality
-       +
-Historical Incidents
-       +
-User Behavior
-       +
-Alert Frequency
-       =
-Overall Risk Score
-```
-
-### Intelligent Incident Prioritization
-
-ML models can help security analysts identify which incidents require immediate attention.
-
----
-
-# 🛣️ Roadmap
-
-## Phase 1 — Dashboard Prototype ✅
-
-* [x] React dashboard
-* [x] Security overview
-* [x] Incident management UI
-* [x] Alerts
-* [x] Analytics
-* [x] Risk map
-* [x] ML insights interface
-* [x] Audit trail interface
-* [x] User management
-* [x] Demo authentication
-
-## Phase 2 — Backend
-
-* [ ] REST API
-* [ ] Persistent database
-* [ ] Real authentication
-* [ ] Role-based authorization
-* [ ] Incident CRUD operations
-* [ ] Alert ingestion
-* [ ] Secure session management
-
-## Phase 3 — Security Intelligence
-
-* [ ] SIEM integration
-* [ ] IDS/IPS integration
-* [ ] Real-time alert ingestion
-* [ ] Automated threat classification
-* [ ] Anomaly detection
-* [ ] Risk scoring
-* [ ] ML-based incident prioritization
-
-## Phase 4 — Cryptographic Integrity
-
-* [ ] SHA-256 audit hashing
-* [ ] Hash-chain implementation
-* [ ] Tamper detection
-* [ ] Cryptographic verification
-* [ ] Secure chain-of-custody records
-
-## Phase 5 — Production Platform
-
-* [ ] Real-time WebSocket updates
-* [ ] Distributed event processing
-* [ ] Advanced RBAC
-* [ ] Security notifications
-* [ ] Automated incident response
-* [ ] Security reports
-* [ ] Cloud deployment
-* [ ] Monitoring and observability
-
----
-
-# 🌐 Deployment
-
-SentinelX is configured for deployment on both **Netlify** and **Vercel**.
-
-### Build
+Build the application:
 
 ```bash
 pnpm build
 ```
 
-### Preview Production Build
+Preview the production build:
 
 ```bash
 pnpm preview
 ```
 
-The production build is generated inside:
+Format the project:
+
+```bash
+pnpm format
+```
+
+The production output is generated in:
 
 ```text
 dist/
@@ -504,113 +713,491 @@ dist/
 
 ---
 
-# ⚠️ Current Limitations
+# 🔄 Current Data Flow
 
-SentinelX is currently a **frontend prototype**.
+The current version uses structured in-memory mock data.
 
-The following components are not yet production-ready:
+```text
+Mock Security Data
+        ↓
+React Application State
+        ↓
+Role-Based Components
+        ↓
+Dashboard / Incidents / Alerts
+        ↓
+Analytics / Risk Map / ML / AI
+        ↓
+Audit Trail
+```
 
-* Mock security data
-* Local demo authentication
-* No persistent backend database
-* No real SIEM ingestion
-* No production ML inference pipeline
-* No server-side authentication verification
-* No real-time security event stream
-* No cryptographically enforced audit ledger
+The application state is managed centrally through:
 
-These limitations are intentional and form the basis of the project's future development roadmap.
+```text
+src/context/AppContext.tsx
+```
+
+This provides shared state for:
+
+- Current user
+- Incidents
+- Alerts
+- Audit logs
+- Toast notifications
+- Session lock
+- Session expiry
+- Access permissions
 
 ---
 
-# 🎯 Project Objectives
+# 🔐 Current Security Design
 
-SentinelX aims to address several common challenges faced by security teams:
+The prototype demonstrates security workflows but does not yet provide production-grade server-side security.
 
-1. **Fragmented security information**
-   Bring incidents, alerts, analytics, and risk information into one interface.
+### Already demonstrated
 
-2. **Slow incident prioritization**
-   Use intelligent risk scoring and ML-assisted analysis.
+- Role-based page permissions
+- Role-specific UI
+- Protected navigation
+- Session inactivity locking
+- Audit logging
+- Tamper-evident chain visualization
+- Permission-aware AI responses
+- Alert action logging
+- User-management permissions
+- Security-focused configuration interface
 
-3. **Limited visibility**
-   Provide centralized dashboards and geographic risk visualization.
+### Planned production security
 
-4. **Audit integrity**
-   Introduce cryptographic mechanisms to detect unauthorized modification of security records.
+- Password hashing
+- JWT authentication
+- Secure refresh tokens
+- Server-side RBAC
+- API authorization
+- Input validation
+- SQL injection protection
+- Rate limiting
+- Secure session storage
+- Secrets management
+- SHA-256 audit hashing
+- Digital signatures
+- Immutable audit storage
+- Zero-trust architecture
 
-5. **Scalability**
-   Design the frontend architecture so it can later connect to distributed backend services and real-time security infrastructure.
+---
+
+# 🧠 Future Backend Architecture
+
+The planned production architecture is:
+
+```text
+React + TypeScript
+        ↓
+FastAPI REST API
+        ↓
+Authentication / Authorization
+        ↓
+Business Logic
+        ↓
+┌───────────────┬────────────────┬────────────────┐
+│               │                │                │
+▼               ▼                ▼                ▼
+Oracle DB    Risk Engine      ML Service       Audit Service
+                                  │
+                                  ▼
+                         SIEM / Event Sources
+```
+
+---
+
+# 🗄️ Planned Oracle Database
+
+The future backend will use Oracle Database as the primary relational database.
+
+Planned entities include:
+
+```text
+USERS
+ROLES
+USER_ROLES
+LOCATIONS
+INCIDENTS
+INCIDENT_TYPES
+SEVERITY_LEVELS
+INCIDENT_ASSIGNMENTS
+ALERTS
+RISK_SCORES
+ML_PREDICTIONS
+AUDIT_LOGS
+SLA_RULES
+ESCALATIONS
+```
+
+The database layer can later include:
+
+- Primary keys
+- Foreign keys
+- Unique constraints
+- Check constraints
+- Indexes
+- Views
+- Sequences/identity columns
+- Stored procedures
+- Functions
+- Carefully selected triggers
+
+---
+
+# 🤖 Planned ML Pipeline
+
+The production ML layer is intended to process historical incidents using Python.
+
+Potential pipeline:
+
+```text
+Historical Incident Data
+        ↓
+Data Cleaning
+        ↓
+Feature Engineering
+        ↓
+Train / Test Split
+        ↓
+Model Training
+        ↓
+Cross Validation
+        ↓
+Model Evaluation
+        ↓
+Risk / Anomaly Prediction
+        ↓
+Store Prediction
+        ↓
+SentinelX Dashboard
+```
+
+Potential models:
+
+- Random Forest
+- Logistic Regression
+- XGBoost
+- Isolation Forest
+- Time-series forecasting
+
+Potential features:
+
+- Hour
+- Day of week
+- Month
+- Location
+- Incident type
+- Severity
+- Incident frequency
+- Historical incidents
+- Resolution time
+- Recurrence
+
+Future evaluation can include:
+
+- Accuracy
+- Precision
+- Recall
+- F1-score
+- Confusion matrix
+- ROC-AUC
+- Feature importance
+- Model comparison
+
+For anomaly detection, evaluation should use appropriate anomaly metrics and validated anomaly datasets rather than blindly applying classification accuracy.
+
+---
+
+# 🚨 Planned SIEM Integration
+
+Future versions can ingest security events from:
+
+- Authentication systems
+- Network infrastructure
+- Firewalls
+- IDS/IPS
+- Endpoint systems
+- Access-control systems
+- Campus sensors
+- Other SIEM platforms
+
+The long-term goal is:
+
+```text
+Security Event
+      ↓
+SIEM / Event Stream
+      ↓
+SentinelX
+      ↓
+Correlation
+      ↓
+Risk Scoring
+      ↓
+Alert
+      ↓
+Incident
+      ↓
+Investigation
+      ↓
+Audit Verification
+```
+
+---
+
+# 🛣️ Development Roadmap
+
+## Phase 1 — Frontend SOC Prototype ✅
+
+Implemented:
+
+- React dashboard
+- Role-based navigation
+- Incident management
+- Incident reporting
+- Incident filtering
+- Incident status workflow
+- Incident assignment
+- Comments/timeline
+- CSV export
+- Alerts
+- Alert acknowledgement
+- Alert escalation
+- Alert dismissal
+- Alert rules interface
+- Risk Map
+- Analytics
+- ML Insights
+- AI Assistant
+- Audit Trail
+- Audit-chain verification
+- User Management
+- Settings
+- Session locking
+- Toast notifications
+- Student reporting view
+
+## Phase 2 — Backend
+
+Planned:
+
+- FastAPI
+- REST APIs
+- Oracle Database
+- Persistent data
+- Server-side authentication
+- JWT
+- Backend RBAC
+- Secure session management
+- Incident CRUD APIs
+- Alert APIs
+- Analytics APIs
+
+## Phase 3 — Security Intelligence
+
+Planned:
+
+- SIEM integration
+- IDS/IPS integration
+- Real-time event ingestion
+- Event correlation
+- Automated threat classification
+- Anomaly detection
+- Dynamic risk scoring
+- ML-based incident prioritization
+
+## Phase 4 — Cryptographic Integrity
+
+Planned:
+
+- SHA-256 audit hashing
+- Server-side hash-chain generation
+- Tamper detection
+- Digital signatures
+- Cryptographic verification
+- Secure chain-of-custody records
+- Immutable audit storage
+
+## Phase 5 — Real-Time Platform
+
+Planned:
+
+- WebSockets
+- Streaming events
+- Distributed event processing
+- Real-time notifications
+- Automated response playbooks
+- Cloud deployment
+- Monitoring and observability
 
 ---
 
 # 🔮 Future Enhancements
 
-Potential long-term capabilities include:
+### Advanced AI / ML
 
-* Real-time SOC monitoring
-* Automated threat hunting
-* AI-assisted incident investigation
-* Natural-language security queries
-* Automated incident-response playbooks
-* MITRE ATT&CK mapping
-* Threat intelligence feeds
-* CVE vulnerability integration
-* Endpoint telemetry
-* Network traffic analysis
-* Security posture scoring
-* Predictive threat analytics
-* Cryptographically verifiable incident reports
-* Post-quantum cryptographic support for future secure communications
+- Deep learning
+- Advanced anomaly detection
+- Explainable AI
+- Model monitoring
+- Automated retraining
+- Better risk forecasting
+
+### Real-Time Processing
+
+- WebSockets
+- Event streaming
+- Real-time alert ingestion
+- Event-driven architecture
+
+### IoT Integration
+
+Potential integrations:
+
+- CCTV metadata
+- Door-access systems
+- Environmental sensors
+- Fire detection
+- Smart lighting
+- Occupancy sensors
+
+Privacy-sensitive biometric or facial-recognition processing should only be introduced when there is a legitimate, lawful, and privacy-compliant requirement.
+
+### Advanced GIS
+
+- Historical risk maps
+- Geospatial clustering
+- Route-risk analysis
+- Location-based alerts
+- Temporal heatmaps
+
+### Mobile Application
+
+- Incident reporting
+- Emergency alerts
+- Notifications
+- Location-based reporting
+
+### Advanced Security
+
+- Zero-trust architecture
+- Digital signatures
+- Immutable audit storage
+- Security-event correlation
+- Post-quantum cryptography experimentation
+- Cryptographically verifiable incident reports
 
 ---
 
-# 🧪 Development
+# 🧪 Testing Roadmap
 
-Format the project using:
+Future production implementation should include:
 
-```bash
-pnpm format
-```
-
-Build the project:
-
-```bash
-pnpm build
-```
-
-Run locally:
-
-```bash
-pnpm dev
-```
+- Unit tests
+- API tests
+- Database tests
+- Authentication tests
+- Authorization tests
+- Incident workflow tests
+- Alert-rule tests
+- Risk-score tests
+- ML pipeline tests
+- Audit-chain integrity tests
+- Security tests
 
 ---
 
-# 🤝 Contributing
+# 🐳 Docker Roadmap
 
-Contributions are welcome.
+Future deployment can containerize:
 
-A typical workflow:
-
-```bash
-git checkout -b feature/new-feature
+```text
+Frontend
+Backend
+Oracle / Database Layer
+ML Service
+Audit Service
 ```
 
-Make your changes, test the application, and commit:
+A Docker Compose environment can provide a reproducible local development setup.
 
-```bash
-git add .
-git commit -m "Add new security feature"
+---
+
+# 🎯 Project Objectives
+
+SentinelX is designed around five major problems:
+
+### Fragmented Security Information
+
+Bring incidents, alerts, analytics, ML insights, and risk information into one platform.
+
+### Slow Incident Prioritization
+
+Use risk scoring, SLA monitoring, alerts, and ML-assisted analysis to help prioritize work.
+
+### Limited Visibility
+
+Provide centralized dashboards, analytics, and geographic risk visualization.
+
+### Audit Integrity
+
+Create a verifiable history of important security actions and prepare the system for cryptographic audit protection.
+
+### Scalability
+
+Build the frontend architecture so it can later connect to backend APIs, databases, SIEM infrastructure, ML services, and real-time event systems.
+
+---
+
+# 🔄 SentinelX Security Workflow
+
+```text
+        DETECT
+          ↓
+       ANALYZE
+          ↓
+      PRIORITIZE
+          ↓
+      INVESTIGATE
+          ↓
+        VERIFY
+          ↓
+        RESPOND
+          ↓
+        AUDIT
 ```
 
-Push the branch:
+SentinelX brings these stages together into a unified security operations workflow.
 
-```bash
-git push origin feature/new-feature
-```
+---
 
-Then open a Pull Request.
+# ⚠️ Current Limitations
+
+The current release is a functional frontend prototype.
+
+The following are **not yet production implementations**:
+
+- Persistent backend database
+- Oracle integration
+- FastAPI backend
+- Real SIEM ingestion
+- Real-time external event stream
+- Production ML inference
+- External LLM integration
+- Server-side authentication
+- Production JWT authentication
+- Real Google OAuth verification
+- Production MFA
+- Cryptographically secure server-side audit ledger
+- SHA-256 audit-chain enforcement
+- Immutable audit storage
+- Production notification delivery
+
+These limitations are intentional. The frontend establishes the product architecture and interaction model before backend and infrastructure integration.
 
 ---
 
@@ -618,18 +1205,52 @@ Then open a Pull Request.
 
 This project is intended for educational, research, and development purposes.
 
-Add an appropriate open-source license before distributing the project publicly.
+Add an appropriate open-source license before public distribution.
 
 ---
 
 # 👨‍💻 Project Status
 
-**Status:** 🚧 Active Development
+**Status: 🚧 Active Development**
 
-SentinelX is currently evolving from a frontend SOC dashboard prototype toward a complete intelligent security monitoring and incident-response platform.
+SentinelX is currently evolving from a frontend SOC-style dashboard into a complete intelligent campus safety and security analytics platform.
 
-### Vision
+### Current milestone
 
-> **Detect → Analyze → Prioritize → Investigate → Verify → Respond**
+**Functional Frontend Security Operations Prototype ✅**
 
-SentinelX aims to bring these stages together into a unified security operations platform.
+### Long-term vision
+
+**Detect → Analyze → Prioritize → Investigate → Verify → Respond → Audit**
+
+---
+
+## ⭐ Why SentinelX?
+
+SentinelX is designed to go beyond a traditional CRUD application.
+
+It combines:
+
+```text
+Frontend Engineering
+        +
+Incident Response
+        +
+Risk Analytics
+        +
+Machine Learning
+        +
+AI-Assisted Analysis
+        +
+Role-Based Access
+        +
+Alert Management
+        +
+Audit Integrity
+        +
+Future SIEM Integration
+        +
+Future Oracle / Backend Infrastructure
+```
+
+The objective is to build a realistic security-operations product architecture where every component has a defined purpose and can evolve into a production backend-driven system.
