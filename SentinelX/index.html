@@ -1,12 +1,238 @@
 <!doctype html>
 <html lang="<!-- figma:lang -->">
   <head>
+    <!-- figma:head-start -->
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title><!-- figma:title --></title>
+
+    <!-- Boot styles: no flash of the wrong theme, plus the loading and error screens. -->
+    <style>
+      :root {
+        --boot-bg: #ffffff;
+        --boot-fg: #111827;
+        --boot-muted: #6b7280;
+        --boot-accent: #6366f1;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --boot-bg: #0b0b0f;
+          --boot-fg: #e5e7eb;
+          --boot-muted: #9ca3af;
+          color-scheme: dark;
+        }
+      }
+      :root[data-theme='dark'] {
+        --boot-bg: #0b0b0f;
+        --boot-fg: #e5e7eb;
+        --boot-muted: #9ca3af;
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--boot-bg);
+        color: var(--boot-fg);
+        -webkit-text-size-adjust: 100%;
+      }
+      #root > .boot {
+        min-height: 100dvh;
+      }
+      .boot {
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        text-align: center;
+        font: 500 14px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      .boot p {
+        margin: 0 0 12px;
+      }
+      .boot__hint {
+        color: var(--boot-muted);
+        font-weight: 400;
+      }
+      .boot__spinner {
+        width: 28px;
+        height: 28px;
+        margin: 0 auto 12px;
+        border: 3px solid color-mix(in srgb, var(--boot-fg) 15%, transparent);
+        border-top-color: var(--boot-accent);
+        border-radius: 50%;
+        animation: boot-spin 0.8s linear infinite;
+      }
+      .boot__button {
+        appearance: none;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 16px;
+        background: var(--boot-accent);
+        color: #fff;
+        font: inherit;
+        cursor: pointer;
+      }
+      .boot__button:focus-visible {
+        outline: 2px solid var(--boot-accent);
+        outline-offset: 2px;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot__spinner {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
+
+    <!--
+      Runs before first paint. Applies the saved theme ("light" | "dark" | "system") as
+      data-theme and a "dark" class (for Tailwind's class-based dark mode), and exposes
+      window.__setTheme(mode) for the app to call.
+    -->
+    <script>
+      ;(function () {
+        var root = document.documentElement
+        var KEY = 'theme'
+
+        function readSaved() {
+          try {
+            var saved = localStorage.getItem(KEY)
+            return saved === 'light' || saved === 'dark' ? saved : 'system'
+          } catch (e) {
+            return 'system'
+          }
+        }
+
+        function apply(mode) {
+          var dark =
+            mode === 'dark' ||
+            (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+
+          if (mode === 'system') root.removeAttribute('data-theme')
+          else root.setAttribute('data-theme', mode)
+          root.classList.toggle('dark', dark)
+
+          // An explicit choice overrides the media-query theme-color tags.
+          var existing = document.querySelector('meta[name="theme-color"][data-managed]')
+          if (mode === 'system') {
+            if (existing) existing.remove()
+            return
+          }
+          if (!existing) {
+            existing = document.createElement('meta')
+            existing.name = 'theme-color'
+            existing.setAttribute('data-managed', '')
+            document.head.appendChild(existing)
+          }
+          existing.content = dark ? '#0b0b0f' : '#ffffff'
+        }
+
+        apply(readSaved())
+
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+          if (readSaved() === 'system') apply('system')
+        })
+
+        window.__setTheme = function (mode) {
+          try {
+            if (mode === 'system') localStorage.removeItem(KEY)
+            else localStorage.setItem(KEY, mode)
+          } catch (e) {}
+          apply(mode)
+        }
+      })()
+    </script>
+    <!-- figma:head-end -->
   </head>
   <body>
-    <div id="root"></div>
+    <!-- figma:body-start -->
+    <noscript>
+      <p style="font-family: system-ui, sans-serif; padding: 24px; text-align: center">
+        This app needs JavaScript to run. Please enable it in your browser settings.
+      </p>
+    </noscript>
+
+    <!-- React replaces everything inside #root once it mounts. -->
+    <div id="root">
+      <div class="boot" role="status" aria-live="polite">
+        <div>
+          <div class="boot__spinner" aria-hidden="true"></div>
+          <span id="boot-message">Loading…</span>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      Startup safety net. Only acts while the loading screen is still showing:
+        - shows a reload screen if the app crashes before it mounts
+        - warns about slow loads and a lost connection
+        - reloads once when a deploy leaves a stale cached chunk behind
+    -->
+    <script>
+      ;(function () {
+        function booting() {
+          var root = document.getElementById('root')
+          return root && root.querySelector('.boot')
+        }
+
+        function showScreen(title, hint) {
+          var root = document.getElementById('root')
+          if (!root || !booting()) return
+          root.innerHTML =
+            '<div class="boot" role="alert"><div>' +
+            '<p>' + title + '</p>' +
+            '<p class="boot__hint">' + hint + '</p>' +
+            '<button type="button" class="boot__button" onclick="location.reload()">Reload</button>' +
+            '</div></div>'
+        }
+
+        function failed() {
+          showScreen('Something went wrong while loading the app.', 'Reloading usually fixes this.')
+        }
+
+        window.addEventListener('error', failed)
+        window.addEventListener('unhandledrejection', failed)
+
+        // Stale chunk after a deploy: reload once, but never loop.
+        window.addEventListener('vite:preloadError', function () {
+          try {
+            if (sessionStorage.getItem('preload-reloaded')) return
+            sessionStorage.setItem('preload-reloaded', '1')
+          } catch (e) {}
+          location.reload()
+        })
+        window.addEventListener('load', function () {
+          try {
+            sessionStorage.removeItem('preload-reloaded')
+          } catch (e) {}
+        })
+
+        // Slow start or no connection.
+        var message = document.getElementById('boot-message')
+        setTimeout(function () {
+          if (!booting() || !message) return
+          message.textContent = navigator.onLine
+            ? 'Still loading… this is taking longer than usual.'
+            : 'You appear to be offline. Waiting for a connection…'
+        }, 8000)
+        window.addEventListener('online', function () {
+          if (booting()) location.reload()
+        })
+      })()
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
+    <!-- figma:body-end -->
   </body>
 </html>
