@@ -1,26 +1,33 @@
-import { useContext, useState, useEffect, useRef, useCallback, type ReactNode } from "react";
-import { AppContext } from "./AppContextInstance";
 import {
-  initialIncidents, initialAlerts, initialAuditLogs,
-  type Incident, type Alert, type AuditLog, type Role, type Severity,
-  RANDOM_ALERT_TEMPLATES, type IncidentStatus,
+  useCallback, useEffect, useMemo, useReducer, useRef, useState,
+  type ReactNode, type SetStateAction,
+} from "react";
+import {
+  AppStateContext, AppActionsContext, SessionContext,
+  type AppActions, type AppState, type Toast, type User,
+} from "./AppContextInstance";
+import {
+  initialIncidents, initialAlerts, initialAuditLogs, RANDOM_ALERT_TEMPLATES,
+  type Alert, type AuditLog, type Incident, type IncidentStatus, type Role, type Severity,
 } from "../data/mockData";
+import { fnv1a, GENESIS_HASH } from "../data/domain";
 
-export interface User {
-  name: string;
-  email: string;
-  role: Role;
-  avatar: string;
-}
+// Consumers keep importing everything from "./context/AppContext"
+export { useApp, useAppActions, useAppState, useSessionTimer } from "./AppContextInstance";
+export type { User, Toast, AppContextValue } from "./AppContextInstance";
 
-export interface Toast {
-  id: string;
-  type: "success" | "error" | "info" | "warning";
-  title: string;
-  message?: string;
-}
+/* ───────────── Constants ───────────── */
 
-export const PAGE_PERMISSIONS: Record<Role, string[]> = {
+const SESSION_SECONDS = 15 * 60;
+const MAX_TOASTS = 5;
+const TOAST_MS = 5000;
+const CLIENT_IP = "10.4.x.x"; // placeholder until the backend supplies the real address
+const ACTIVITY_EVENTS = ["mousemove", "keydown", "click", "scroll", "touchstart"] as const;
+const SIMULATED_ALERT_LOCATIONS = [
+  "Server Room — Block C", "Parking Lot B — Zone 3", "IT Infrastructure Hub", "Library — Wi-Fi Zone",
+] as const;
+
+export const PAGE_PERMISSIONS: Record<Role, readonly string[]> = {
   Administrator: ["dashboard", "incidents", "riskmap", "analytics", "alerts", "ml", "audit", "users", "settings"],
   "Security Officer": ["dashboard", "incidents", "riskmap", "alerts", "audit"],
   Analyst: ["dashboard", "analytics", "ml", "riskmap", "incidents"],
@@ -28,219 +35,325 @@ export const PAGE_PERMISSIONS: Record<Role, string[]> = {
   Student: ["dashboard", "incidents"],
 };
 
-interface AppContextValue {
-  user: User | null;
-  setUser: (u: User | null) => void;
+/* ───────────── Helpers (pure) ───────────── */
+
+// UTC "YYYY-MM-DD HH:mm" / "HH:mm", the same format the mock data uses
+const stampDate = (d: Date) => d.toISOString().slice(0, 16).replace("T", " ");
+const stampTime = (d: Date) => d.toISOString().slice(11, 16);
+const pick = <T,>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)];
+
+type AuditInput = Omit<AuditLog, "id" | "hash" | "prevHash" | "time"> & { time?: string };
+
+/** Newest-first chain: each entry's hash covers the previous hash, so edits break every later link. */
+function appendAudit(logs: AuditLog[], e: AuditInput, at: Date): AuditLog[] {
+  const last = logs[0];
+  const seq = last ? Number(last.id.slice(4)) + 1 : 1;
+  const time = e.time ?? stampDate(at);
+  const prevHash = last?.hash ?? GENESIS_HASH;
+  const entry: AuditLog = {
+    ...e,
+    time,
+    id: `AUD-${seq}`,
+    prevHash,
+    hash: fnv1a([prevHash, time, e.user, e.action, e.entity, e.prev, e.next].join("|")),
+  };
+  return [entry, ...logs];
+}
+
+const nextAlertNumber = (alerts: Alert[]) =>
+  alerts.reduce((max, a) => Math.max(max, Number(a.id.slice(4)) || 0), 1041) + 1;
+
+/* ───────────── Reducer: every change and its audit entry happen atomically ───────────── */
+
+interface DataState {
   incidents: Incident[];
-  addIncident: (inc: Incident) => void;
-  updateIncidentStatus: (id: string, status: IncidentStatus, by: string, note?: string) => void;
-  updateIncidentAssignee: (id: string, assignee: string, by: string) => void;
-  addComment: (id: string, author: string, text: string) => void;
   alerts: Alert[];
-  setAlerts: React.Dispatch<React.SetStateAction<Alert[]>>;
-  acknowledgeAlert: (id: string) => void;
-  dismissAlert: (id: string, reason: string) => void;
-  escalateAlert: (id: string) => void;
-  newAlertCount: number;
-  clearNewAlertCount: () => void;
   auditLogs: AuditLog[];
-  addAuditLog: (log: Omit<AuditLog, "id" | "hash" | "prevHash">) => void;
   toasts: Toast[];
-  showToast: (t: Omit<Toast, "id">) => void;
-  dismissToast: (id: string) => void;
-  isLocked: boolean;
-  unlock: () => void;
-  sessionExpiry: number;
-  showLogoutModal: boolean;
-  setShowLogoutModal: (v: boolean) => void;
-  canAccess: (page: string) => boolean;
+  newAlertCount: number;
 }
 
-export function useApp() {
-  const ctx = useContext(AppContext) as AppContextValue | null;
-  if (!ctx) throw new Error("useApp must be used within AppProvider");
-  return ctx;
+type AlertTemplate = { rule: string; severity: Severity; description: string };
+
+type Action =
+  | { type: "incident/add"; incident: Incident; actor: string; at: Date }
+  | { type: "incident/status"; id: string; status: IncidentStatus; by: string; note?: string; actor: string; at: Date }
+  | { type: "incident/assign"; id: string; assignee: string; by: string; actor: string; at: Date }
+  | { type: "incident/comment"; id: string; author: string; text: string; at: Date }
+  | { type: "alert/received"; template: AlertTemplate; incident: Alert["incident"]; at: Date }
+  | { type: "alert/acknowledge"; id: string; actor: string; at: Date }
+  | { type: "alert/dismiss"; id: string; reason: string; actor: string; at: Date }
+  | { type: "alert/escalate"; id: string; actor: string; at: Date }
+  | { type: "alerts/replace"; next: SetStateAction<Alert[]> }
+  | { type: "alerts/seen" }
+  | { type: "audit/add"; entry: AuditInput; at: Date }
+  | { type: "toast/show"; toast: Toast }
+  | { type: "toast/dismiss"; id: string };
+
+const initialData = (): DataState => ({
+  incidents: initialIncidents,
+  alerts: initialAlerts,
+  auditLogs: initialAuditLogs,
+  toasts: [],
+  newAlertCount: 0,
+});
+
+function reducer(s: DataState, a: Action): DataState {
+  switch (a.type) {
+    case "incident/add":
+      return {
+        ...s,
+        incidents: [a.incident, ...s.incidents],
+        auditLogs: appendAudit(s.auditLogs, {
+          user: a.actor, action: "INCIDENT_CREATED", entity: a.incident.id,
+          prev: "—", next: a.incident.status, ip: CLIENT_IP,
+        }, a.at),
+      };
+
+    case "incident/status": {
+      const inc = s.incidents.find((i) => i.id === a.id);
+      if (!inc || inc.status === a.status) return s;
+      const entry = { time: stampTime(a.at), action: `Status → ${a.status}`, by: a.by, note: a.note };
+      return {
+        ...s,
+        incidents: s.incidents.map((i) =>
+          i.id === a.id ? { ...i, status: a.status, timeline: [...i.timeline, entry] } : i),
+        auditLogs: appendAudit(s.auditLogs, {
+          user: a.actor, action: "INCIDENT_STATUS_CHANGED", entity: a.id,
+          prev: inc.status, next: a.status, ip: CLIENT_IP,
+        }, a.at),
+      };
+    }
+
+    case "incident/assign": {
+      const inc = s.incidents.find((i) => i.id === a.id);
+      if (!inc) return s;
+      const entry = { time: stampTime(a.at), action: `Reassigned to ${a.assignee}`, by: a.by };
+      return {
+        ...s,
+        incidents: s.incidents.map((i) =>
+          i.id === a.id ? { ...i, assigned: a.assignee, timeline: [...i.timeline, entry] } : i),
+        auditLogs: appendAudit(s.auditLogs, {
+          user: a.actor, action: "INCIDENT_ASSIGNED", entity: a.id,
+          prev: inc.assigned, next: a.assignee, ip: CLIENT_IP,
+        }, a.at),
+      };
+    }
+
+    case "incident/comment": {
+      const comment = { time: stampTime(a.at), author: a.author, text: a.text };
+      return {
+        ...s,
+        incidents: s.incidents.map((i) =>
+          i.id === a.id ? { ...i, comments: [...i.comments, comment] } : i),
+      };
+    }
+
+    case "alert/received": {
+      const alert: Alert = {
+        id: `ALT-${nextAlertNumber(s.alerts)}`,
+        rule: a.template.rule,
+        incident: a.incident,
+        severity: a.template.severity,
+        time: stampTime(a.at),
+        status: "Active",
+        description: a.template.description,
+      };
+      return {
+        ...s,
+        alerts: [alert, ...s.alerts],
+        newAlertCount: s.newAlertCount + 1,
+        auditLogs: appendAudit(s.auditLogs, {
+          user: "system@sentinelx", action: "ALERT_GENERATED", entity: alert.id,
+          prev: "—", next: "Active", ip: "10.4.0.1",
+        }, a.at),
+      };
+    }
+
+    case "alert/acknowledge": {
+      const alert = s.alerts.find((x) => x.id === a.id);
+      if (!alert) return s;
+      return {
+        ...s,
+        alerts: s.alerts.map((x) => (x.id === a.id ? { ...x, status: "Acknowledged" } : x)),
+        auditLogs: appendAudit(s.auditLogs, {
+          user: a.actor, action: "ALERT_ACKNOWLEDGED", entity: a.id,
+          prev: alert.status, next: "Acknowledged", ip: CLIENT_IP,
+        }, a.at),
+      };
+    }
+
+    case "alert/dismiss": {
+      const alert = s.alerts.find((x) => x.id === a.id);
+      if (!alert) return s;
+      return {
+        ...s,
+        alerts: s.alerts.map((x) => (x.id === a.id ? { ...x, status: "Dismissed", dismissReason: a.reason } : x)),
+        auditLogs: appendAudit(s.auditLogs, {
+          user: a.actor, action: "ALERT_DISMISSED", entity: a.id,
+          prev: alert.status, next: `Dismissed: ${a.reason}`, ip: CLIENT_IP,
+        }, a.at),
+      };
+    }
+
+    case "alert/escalate": {
+      const alert = s.alerts.find((x) => x.id === a.id);
+      if (!alert) return s;
+      return {
+        ...s,
+        alerts: s.alerts.map((x) => (x.id === a.id ? { ...x, status: "Active", severity: "Critical" } : x)),
+        auditLogs: appendAudit(s.auditLogs, {
+          user: a.actor, action: "ALERT_ESCALATED", entity: a.id,
+          prev: `${alert.severity}/${alert.status}`, next: "Critical/Active", ip: CLIENT_IP,
+        }, a.at),
+      };
+    }
+
+    case "alerts/replace":
+      return { ...s, alerts: typeof a.next === "function" ? a.next(s.alerts) : a.next };
+
+    case "alerts/seen":
+      return s.newAlertCount === 0 ? s : { ...s, newAlertCount: 0 };
+
+    case "audit/add":
+      return { ...s, auditLogs: appendAudit(s.auditLogs, a.entry, a.at) };
+
+    case "toast/show":
+      return { ...s, toasts: [...s.toasts.slice(-(MAX_TOASTS - 1)), a.toast] };
+
+    case "toast/dismiss":
+      return { ...s, toasts: s.toasts.filter((t) => t.id !== a.id) };
+  }
 }
 
-let alertCounter = 1042;
+/* ───────────── Provider ───────────── */
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [data, dispatch] = useReducer(reducer, undefined, initialData);
   const [user, setUserState] = useState<User | null>(null);
-  const [incidents, setIncidents] = useState<Incident[]>(initialIncidents);
-  const [alerts, setAlerts] = useState<Alert[]>(initialAlerts);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [isLocked, setIsLocked] = useState(false);
-  const [sessionExpiry, setSessionExpiry] = useState(15 * 60);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [newAlertCount, setNewAlertCount] = useState(0);
+  const [sessionExpiry, setSessionExpiry] = useState(SESSION_SECONDS);
 
-  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const realtimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const expiryRef = useRef(15 * 60);
+  // Refs let stable callbacks read the latest values without being re-created
+  const userRef = useRef<User | null>(null);
+  const incidentsRef = useRef(data.incidents);
+  const expiresAt = useRef(0);
+  const toastTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
 
-  const resetIdle = useCallback(() => {
-    if (!user || isLocked) return;
-    expiryRef.current = 15 * 60;
-    setSessionExpiry(15 * 60);
-    if (idleTimer.current) clearTimeout(idleTimer.current);
-    idleTimer.current = setTimeout(() => setIsLocked(true), 15 * 60 * 1000);
-  }, [user, isLocked]);
+  useEffect(() => { incidentsRef.current = data.incidents; }, [data.incidents]);
 
+  const active = user !== null && !isLocked;
+
+  /* Session: one deadline timestamp. Activity only moves the deadline (no state update, no re-render),
+     and the 1 s tick derives the countdown from the clock, so it stays correct after a sleeping tab. */
   useEffect(() => {
-    if (!user) return;
-    const events = ["mousemove", "keydown", "click", "scroll"];
-    events.forEach(e => window.addEventListener(e, resetIdle, { passive: true }));
-    resetIdle();
-    countdownRef.current = setInterval(() => {
-      setSessionExpiry(prev => {
-        if (prev <= 1) { setIsLocked(true); return 0; }
-        return prev - 1;
-      });
+    if (!active) return;
+    const extend = () => { expiresAt.current = Date.now() + SESSION_SECONDS * 1000; };
+    extend();
+    setSessionExpiry(SESSION_SECONDS);
+
+    ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, extend, { passive: true }));
+    const tick = setInterval(() => {
+      const left = Math.max(0, Math.ceil((expiresAt.current - Date.now()) / 1000));
+      setSessionExpiry(left);
+      if (left === 0) setIsLocked(true);
     }, 1000);
+
     return () => {
-      events.forEach(e => window.removeEventListener(e, resetIdle));
-      if (idleTimer.current) clearTimeout(idleTimer.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, extend));
+      clearInterval(tick);
     };
-  }, [user, resetIdle]);
+  }, [active]);
 
-  // Real-time alert simulation
+  /* Toasts */
+  const dismissToast = useCallback((id: string) => dispatch({ type: "toast/dismiss", id }), []);
+  const showToast = useCallback((t: Omit<Toast, "id">) => {
+    const id = crypto.randomUUID();
+    dispatch({ type: "toast/show", toast: { ...t, id } });
+    const timer = setTimeout(() => {
+      toastTimers.current.delete(timer);
+      dispatch({ type: "toast/dismiss", id });
+    }, TOAST_MS);
+    toastTimers.current.add(timer);
+  }, []);
   useEffect(() => {
-    if (!user) return;
-    const scheduleNext = () => {
-      const delay = 20000 + Math.random() * 20000;
-      realtimeRef.current = setTimeout(() => {
-        const tpl = RANDOM_ALERT_TEMPLATES[Math.floor(Math.random() * RANDOM_ALERT_TEMPLATES.length)];
-        const loc = ["Server Room — Block C", "Parking Lot B", "IT Infrastructure Hub", "Library — Wi-Fi Zone"][Math.floor(Math.random() * 4)];
-        const newAlert: Alert = {
-          id: `ALT-${alertCounter++}`,
-          rule: tpl.rule,
-          incident: `INC-${2892 + alertCounter}`,
-          severity: tpl.severity,
-          time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-          status: "Active",
-          description: `${tpl.desc} — ${loc}`,
-        };
-        setAlerts(prev => [newAlert, ...prev]);
-        setNewAlertCount(c => c + 1);
-        showToastFn({ type: "warning", title: `New Alert: ${tpl.rule}`, message: newAlert.description });
-        scheduleNext();
-      }, delay);
+    const timers = toastTimers.current;
+    return () => { timers.forEach(clearTimeout); timers.clear(); };
+  }, []);
+
+  /* Simulated real-time alerts (paused while locked or signed out) */
+  useEffect(() => {
+    if (!active) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        const tpl = pick(RANDOM_ALERT_TEMPLATES);
+        const location = pick(SIMULATED_ALERT_LOCATIONS);
+        // Link to a real open incident at that location; otherwise don't invent an ID
+        const match = incidentsRef.current.find(
+          (i) => i.location === location && i.status !== "Resolved" && i.status !== "Closed");
+        const description = `${tpl.desc} — ${location}`;
+        dispatch({
+          type: "alert/received",
+          template: { rule: tpl.rule, severity: tpl.severity, description },
+          incident: match?.id ?? "Multiple",
+          at: new Date(),
+        });
+        showToast({ type: "warning", title: `New alert: ${tpl.rule}`, message: description });
+        schedule();
+      }, 20_000 + Math.random() * 20_000);
     };
-    scheduleNext();
-    return () => { if (realtimeRef.current) clearTimeout(realtimeRef.current); };
-  }, [user]);
+    schedule();
+    return () => clearTimeout(timer);
+  }, [active, showToast]);
 
-  function addAuditLog(log: Omit<AuditLog, "id" | "hash" | "prevHash">) {
-    setAuditLogs(prev => {
-      const prevHash = prev[0]?.hash ?? "0000000";
-      const hash = Math.random().toString(36).slice(2, 10);
-      const newEntry: AuditLog = {
-        ...log,
-        id: `AUD-${9883 + prev.length}`,
-        hash,
-        prevHash,
-      };
-      return [newEntry, ...prev];
-    });
-  }
+  /* Actions: created once, identity never changes */
+  const actions = useMemo<AppActions>(() => {
+    const actor = () => userRef.current?.email ?? "unknown";
+    return {
+      setUser: (u) => {
+        userRef.current = u;
+        setUserState(u);
+        if (!u) setIsLocked(false);
+      },
+      addIncident: (incident) => dispatch({ type: "incident/add", incident, actor: actor(), at: new Date() }),
+      updateIncidentStatus: (id, status, by, note) =>
+        dispatch({ type: "incident/status", id, status, by, note, actor: actor(), at: new Date() }),
+      updateIncidentAssignee: (id, assignee, by) =>
+        dispatch({ type: "incident/assign", id, assignee, by, actor: actor(), at: new Date() }),
+      addComment: (id, author, text) => dispatch({ type: "incident/comment", id, author, text, at: new Date() }),
+      setAlerts: (next) => dispatch({ type: "alerts/replace", next }),
+      acknowledgeAlert: (id) => dispatch({ type: "alert/acknowledge", id, actor: actor(), at: new Date() }),
+      dismissAlert: (id, reason) => dispatch({ type: "alert/dismiss", id, reason, actor: actor(), at: new Date() }),
+      escalateAlert: (id) => {
+        dispatch({ type: "alert/escalate", id, actor: actor(), at: new Date() });
+        showToast({ type: "error", title: "Alert escalated to Critical", message: `${id} has been escalated` });
+      },
+      clearNewAlertCount: () => dispatch({ type: "alerts/seen" }),
+      addAuditLog: (entry) => dispatch({ type: "audit/add", entry, at: new Date() }),
+      showToast,
+      dismissToast,
+      unlock: () => setIsLocked(false), // the session effect restarts the countdown
+      setShowLogoutModal,
+    };
+  }, [showToast, dismissToast]);
 
-  function setUser(u: User | null) {
-    setUserState(u);
-    if (!u) {
-      setIsLocked(false);
-      if (idleTimer.current) clearTimeout(idleTimer.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    }
-  }
+  const canAccess = useCallback(
+    (page: string) => (user ? PAGE_PERMISSIONS[user.role]?.includes(page) ?? false : false),
+    [user],
+  );
 
-  function addIncident(inc: Incident) {
-    setIncidents(prev => [inc, ...prev]);
-    addAuditLog({
-      user: user?.email ?? "unknown",
-      action: "INCIDENT_CREATED",
-      entity: inc.id,
-      prev: "—",
-      next: "Open",
-      time: new Date().toLocaleString(),
-      ip: "10.4.x.x",
-    });
-  }
-
-  function updateIncidentStatus(id: string, status: IncidentStatus, by: string, note?: string) {
-    setIncidents(prev => prev.map(inc => {
-      if (inc.id !== id) return inc;
-      const entry = { time: new Date().toLocaleTimeString(), action: `Status → ${status}`, by, note };
-      return { ...inc, status, timeline: [...inc.timeline, entry] };
-    }));
-    const inc = incidents.find(i => i.id === id);
-    if (inc) addAuditLog({ user: user?.email ?? "unknown", action: "INCIDENT_STATUS_CHANGED", entity: id, prev: inc.status, next: status, time: new Date().toLocaleString(), ip: "10.4.x.x" });
-  }
-
-  function updateIncidentAssignee(id: string, assignee: string, by: string) {
-    setIncidents(prev => prev.map(inc => {
-      if (inc.id !== id) return inc;
-      const entry = { time: new Date().toLocaleTimeString(), action: `Reassigned to ${assignee}`, by };
-      return { ...inc, assigned: assignee, timeline: [...inc.timeline, entry] };
-    }));
-    addAuditLog({ user: user?.email ?? "unknown", action: "INCIDENT_ASSIGNED", entity: id, prev: "Previous", next: assignee, time: new Date().toLocaleString(), ip: "10.4.x.x" });
-  }
-
-  function addComment(id: string, author: string, text: string) {
-    const time = new Date().toLocaleTimeString();
-    setIncidents(prev => prev.map(inc => inc.id !== id ? inc : { ...inc, comments: [...inc.comments, { time, author, text }] }));
-  }
-
-  function acknowledgeAlert(id: string) {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: "Acknowledged" } : a));
-    addAuditLog({ user: user?.email ?? "unknown", action: "ALERT_ACKNOWLEDGED", entity: id, prev: "Active", next: "Acknowledged", time: new Date().toLocaleString(), ip: "10.4.x.x" });
-  }
-
-  function dismissAlert(id: string, reason: string) {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: "Dismissed", dismissReason: reason } : a));
-    addAuditLog({ user: user?.email ?? "unknown", action: "ALERT_DISMISSED", entity: id, prev: "Active", next: `Dismissed: ${reason}`, time: new Date().toLocaleString(), ip: "10.4.x.x" });
-  }
-
-  function escalateAlert(id: string) {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: "Active", severity: "Critical" } : a));
-    addAuditLog({ user: user?.email ?? "unknown", action: "ALERT_ESCALATED", entity: id, prev: "Acknowledged", next: "Critical/Active", time: new Date().toLocaleString(), ip: "10.4.x.x" });
-    showToastFn({ type: "error", title: "Alert Escalated to Critical", message: `${id} has been escalated` });
-  }
-
-  function clearNewAlertCount() { setNewAlertCount(0); }
-
-  function showToastFn(t: Omit<Toast, "id">) {
-    const id = Math.random().toString(36).slice(2);
-    setToasts(prev => [...prev.slice(-4), { ...t, id }]);
-    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 5000);
-  }
-
-  function dismissToast(id: string) { setToasts(prev => prev.filter(t => t.id !== id)); }
-
-  function unlock() {
-    setIsLocked(false);
-    expiryRef.current = 15 * 60;
-    setSessionExpiry(15 * 60);
-    resetIdle();
-  }
-
-  function canAccess(page: string) {
-    if (!user) return false;
-    return PAGE_PERMISSIONS[user.role]?.includes(page) ?? false;
-  }
+  const state = useMemo<AppState>(
+    () => ({ user, ...data, isLocked, showLogoutModal, canAccess }),
+    [user, data, isLocked, showLogoutModal, canAccess],
+  );
 
   return (
-    <AppContext.Provider value={{
-      user, setUser, incidents, addIncident, updateIncidentStatus, updateIncidentAssignee, addComment,
-      alerts, setAlerts, acknowledgeAlert, dismissAlert, escalateAlert, newAlertCount, clearNewAlertCount,
-      auditLogs, addAuditLog,
-      toasts, showToast: showToastFn, dismissToast,
-      isLocked, unlock, sessionExpiry, showLogoutModal, setShowLogoutModal,
-      canAccess,
-    }}>
-      {children}
-    </AppContext.Provider>
+    <AppActionsContext.Provider value={actions}>
+      <AppStateContext.Provider value={state}>
+        <SessionContext.Provider value={sessionExpiry}>{children}</SessionContext.Provider>
+      </AppStateContext.Provider>
+    </AppActionsContext.Provider>
   );
 }
