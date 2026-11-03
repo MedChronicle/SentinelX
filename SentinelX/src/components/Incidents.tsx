@@ -1,46 +1,153 @@
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
-import { LOCATIONS, INCIDENT_TYPES, type Incident, type IncidentStatus, type Severity } from "../data/mockData";
+import {
+  LOCATIONS,
+  INCIDENT_TYPES,
+  type Incident,
+  type IncidentStatus,
+  type Severity,
+} from "../data/mockData";
 
-const STATUSES: IncidentStatus[] = ["Open", "Investigating", "Escalated", "Resolved", "Closed"];
+const STATUSES: IncidentStatus[] = [
+  "Open",
+  "Investigating",
+  "Escalated",
+  "Resolved",
+  "Closed",
+];
+
 const SEVERITIES: Severity[] = ["Critical", "High", "Moderate", "Low"];
-const OFFICERS = ["Lt. Kavita Nair", "Sgt. Rajan Mehta", "Off. Dev Patel", "Off. Neha Kapoor", "Eng. Suresh Kumar", "Medical Unit 1"];
+
+const OFFICERS = [
+  "Lt. Kavita Nair",
+  "Sgt. Rajan Mehta",
+  "Off. Dev Patel",
+  "Off. Neha Kapoor",
+  "Eng. Suresh Kumar",
+  "Medical Unit 1",
+];
+
+const PAGE_SIZE = 12;
+
+const SEVERITY_COLORS: Record<Severity, string> = {
+  Critical: "#ef4444",
+  High: "#f97316",
+  Moderate: "#f59e0b",
+  Low: "#10b981",
+};
 
 function exportCSV(data: Incident[]) {
-  const headers = ["ID", "Type", "Location", "Exact Location", "Severity", "Status", "Reporter", "Assigned", "Occurred", "Reported", "Risk Score"];
-  const rows = data.map(i => [i.id, i.type, i.location, i.locationDetail ?? "", i.severity, i.status, i.reporter, i.assigned, i.occurredAt ?? "", i.time, i.riskScore]);
-  const escapeCell = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
-  const csv = [headers, ...rows].map(r => r.map(escapeCell).join(",")).join("\n");
-  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+  const headers = [
+    "ID",
+    "Type",
+    "Location",
+    "Exact Location",
+    "Severity",
+    "Status",
+    "Reporter",
+    "Assigned",
+    "Occurred",
+    "Reported",
+    "Risk Score",
+    "Description",
+  ];
+
+  const escapeCell = (value: unknown) =>
+    `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+  const rows = data.map((incident) =>
+    [
+      incident.id,
+      incident.type,
+      incident.location,
+      incident.locationDetail,
+      incident.severity,
+      incident.status,
+      incident.reporter,
+      incident.assigned,
+      incident.occurredAt,
+      incident.time,
+      incident.riskScore,
+      incident.description,
+    ]
+      .map(escapeCell)
+      .join(","),
+  );
+
+  const csv = [
+    headers.map(escapeCell).join(","),
+    ...rows,
+  ].join("\r\n");
+
+  const blob = new Blob(["\uFEFF", csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = "sentinelx_incidents.csv"; a.click();
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = "sentinelx_incidents.csv";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   URL.revokeObjectURL(url);
 }
 
-export default function Incidents() {
-  const { user, incidents, addIncident, updateIncidentStatus, updateIncidentAssignee, addComment, showToast } = useApp();
-  const isReadOnly = user?.role === "Analyst";
+function formatDate(value?: string) {
+  if (!value) return "Not provided";
+  const parsed = new Date(value.replace(" ", "T"));
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
 
-  // Filters
+function matchesDateRange(value: string, from: string, to: string) {
+  // Incident.time is stored as "YYYY-MM-DD HH:mm", so lexical comparison
+  // is safe for the normalized date format used by this application.
+  const normalized = value.replace("T", " ").slice(0, 16);
+  if (from && normalized < `${from} 00:00`) return false;
+  if (to && normalized > `${to} 23:59`) return false;
+  return true;
+}
+
+export default function Incidents() {
+  const {
+    user,
+    incidents,
+    addIncident,
+    updateIncidentStatus,
+    updateIncidentAssignee,
+    addComment,
+    showToast,
+  } = useApp();
+
+  const canModify =
+    user?.role === "Administrator" || user?.role === "Security Officer";
+
+  const isStudent = user?.role === "Student";
+
+  // Search and filters
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
-  const [sevFilter, setSevFilter] = useState("All");
+  const [severityFilter, setSeverityFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [locationFilter, setLocationFilter] = useState("All");
+  const [assigneeFilter, setAssigneeFilter] = useState("All");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest" | "risk">("newest");
+  const [page, setPage] = useState(1);
 
-  // Modals
+  // Detail panel and form visibility
   const [selected, setSelected] = useState<Incident | null>(null);
   const [showForm, setShowForm] = useState(false);
 
-  // Detail panel state
+  // Detail panel controls
   const [newComment, setNewComment] = useState("");
   const [newStatus, setNewStatus] = useState<IncidentStatus>("Open");
   const [newAssignee, setNewAssignee] = useState("");
   const [statusNote, setStatusNote] = useState("");
 
-  // New incident form
   const emptyForm = {
     type: INCIDENT_TYPES[0],
     location: LOCATIONS[0],
@@ -50,43 +157,193 @@ export default function Incidents() {
     severity: "Moderate" as Severity,
     evidence: "",
     witnessInfo: "",
-    contactPreference: "In-app updates" as NonNullable<Incident["contactPreference"]>,
+    contactPreference: "In-app updates" as NonNullable<
+      Incident["contactPreference"]
+    >,
     immediateDanger: false,
   };
+
   const [form, setForm] = useState(emptyForm);
 
+  // Students only see incidents they personally submitted.
   const visibleIncidents = useMemo(() => {
-    if (user?.role === "Student") return incidents.filter(inc => inc.reporterEmail === user.email);
+    if (isStudent) {
+      return incidents.filter(
+        (incident) => incident.reporterEmail === user?.email,
+      );
+    }
     return incidents;
-  }, [incidents, user]);
+  }, [incidents, isStudent, user?.email]);
 
   const filtered = useMemo(() => {
-    return visibleIncidents.filter(inc => {
-      if (typeFilter !== "All" && inc.type !== typeFilter) return false;
-      if (sevFilter !== "All" && inc.severity !== sevFilter) return false;
-      if (statusFilter !== "All" && inc.status !== statusFilter) return false;
-      if (locationFilter !== "All" && inc.location !== locationFilter) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (!inc.id.toLowerCase().includes(q) && !inc.type.toLowerCase().includes(q) && !inc.location.toLowerCase().includes(q) && !inc.reporter.toLowerCase().includes(q)) return false;
-      }
-      if (dateFrom && inc.time < dateFrom) return false;
-      if (dateTo && inc.time > dateTo + " 23:59") return false;
-      return true;
-    });
-  }, [visibleIncidents, typeFilter, sevFilter, statusFilter, locationFilter, search, dateFrom, dateTo]);
+    const query = search.trim().toLowerCase();
+
+    return visibleIncidents
+      .filter((incident) => {
+        if (typeFilter !== "All" && incident.type !== typeFilter) return false;
+        if (severityFilter !== "All" && incident.severity !== severityFilter) return false;
+        if (statusFilter !== "All" && incident.status !== statusFilter) return false;
+        if (locationFilter !== "All" && incident.location !== locationFilter) return false;
+        if (assigneeFilter !== "All" && incident.assigned !== assigneeFilter) return false;
+
+        if (query) {
+          const searchable = [
+            incident.id,
+            incident.type,
+            incident.location,
+            incident.locationDetail,
+            incident.reporter,
+            incident.assigned,
+            incident.description,
+            incident.status,
+            incident.severity,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          if (!searchable.includes(query)) return false;
+        }
+
+        if (!matchesDateRange(incident.time, dateFrom, dateTo)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortOrder === "risk") return b.riskScore - a.riskScore;
+
+        const aTime = new Date(a.time.replace(" ", "T")).getTime();
+        const bTime = new Date(b.time.replace(" ", "T")).getTime();
+
+        return sortOrder === "newest" ? bTime - aTime : aTime - bTime;
+      });
+  }, [
+    visibleIncidents,
+    search,
+    typeFilter,
+    severityFilter,
+    statusFilter,
+    locationFilter,
+    assigneeFilter,
+    dateFrom,
+    dateTo,
+    sortOrder,
+  ]);
+
+  const stats = useMemo(() => {
+    const open = visibleIncidents.filter((i) => i.status === "Open").length;
+    const active = visibleIncidents.filter(
+      (i) => i.status === "Investigating" || i.status === "Escalated",
+    ).length;
+    const critical = visibleIncidents.filter(
+      (i) => i.severity === "Critical" && i.status !== "Resolved" && i.status !== "Closed",
+    ).length;
+    const resolved = visibleIncidents.filter(
+      (i) => i.status === "Resolved" || i.status === "Closed",
+    ).length;
+
+    return {
+      total: visibleIncidents.length,
+      open,
+      active,
+      critical,
+      resolved,
+    };
+  }, [visibleIncidents]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageIncidents = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  const assignees = useMemo(
+    () =>
+      Array.from(new Set(visibleIncidents.map((incident) => incident.assigned)))
+        .filter(Boolean)
+        .sort(),
+    [visibleIncidents],
+  );
+
+  // Keep an open detail panel synchronized with context updates.
+  useEffect(() => {
+    if (!selected) return;
+    const latest = incidents.find((incident) => incident.id === selected.id);
+    if (latest && latest !== selected) setSelected(latest);
+    if (!latest) setSelected(null);
+  }, [incidents, selected]);
+
+  function clearFilters() {
+    setSearch("");
+    setTypeFilter("All");
+    setSeverityFilter("All");
+    setStatusFilter("All");
+    setLocationFilter("All");
+    setAssigneeFilter("All");
+    setDateFrom("");
+    setDateTo("");
+    setSortOrder("newest");
+    setPage(1);
+  }
+
+  function openIncident(incident: Incident) {
+    setSelected(incident);
+    setNewStatus(incident.status);
+    setNewAssignee(incident.assigned);
+    setStatusNote("");
+    setNewComment("");
+  }
 
   function handleSubmitIncident() {
     const description = form.description.trim();
-    if (!form.occurredAt) { showToast({ type: "error", title: "Occurrence time required", message: "Tell security when the incident happened." }); return; }
-    if (new Date(form.occurredAt).getTime() > Date.now()) { showToast({ type: "error", title: "Invalid occurrence time", message: "The incident time cannot be in the future." }); return; }
-    if (!form.locationDetail.trim()) { showToast({ type: "error", title: "Exact location required", message: "Add a room, floor, landmark, or zone." }); return; }
-    if (description.length < 20) { showToast({ type: "error", title: "More detail required", message: "Please enter at least 20 characters describing what happened." }); return; }
+
+    if (!form.occurredAt) {
+      showToast({
+        type: "error",
+        title: "Occurrence time required",
+        message: "Tell security when the incident happened.",
+      });
+      return;
+    }
+
+    if (new Date(form.occurredAt).getTime() > Date.now()) {
+      showToast({
+        type: "error",
+        title: "Invalid occurrence time",
+        message: "The incident time cannot be in the future.",
+      });
+      return;
+    }
+
+    if (!form.locationDetail.trim()) {
+      showToast({
+        type: "error",
+        title: "Exact location required",
+        message: "Add a room, floor, landmark, or zone.",
+      });
+      return;
+    }
+
+    if (description.length < 20) {
+      showToast({
+        type: "error",
+        title: "More detail required",
+        message: "Please enter at least 20 characters describing what happened.",
+      });
+      return;
+    }
+
     const now = new Date();
-    const nextNumber = Math.max(2891, ...incidents.map(inc => Number(inc.id.replace(/\D/g, "")) || 0)) + 1;
+    const nextNumber =
+      Math.max(
+        2891,
+        ...incidents.map((incident) => Number(incident.id.replace(/\D/g, "")) || 0),
+      ) + 1;
+
     const id = `INC-${nextNumber}`;
     const severity = form.immediateDanger ? "Critical" : form.severity;
-    const inc: Incident = {
+
+    const newIncident: Incident = {
       id,
       type: form.type,
       description,
@@ -99,343 +356,857 @@ export default function Incidents() {
       reporterEmail: user?.email,
       assigned: "Unassigned",
       time: now.toISOString().slice(0, 16).replace("T", " "),
-      riskScore: severity === "Critical" ? 90 : severity === "High" ? 70 : severity === "Moderate" ? 45 : 20,
+      riskScore:
+        severity === "Critical"
+          ? 90
+          : severity === "High"
+            ? 70
+            : severity === "Moderate"
+              ? 45
+              : 20,
       evidence: form.evidence.trim() || undefined,
       witnessInfo: form.witnessInfo.trim() || undefined,
       contactPreference: form.contactPreference,
       immediateDanger: form.immediateDanger,
-      timeline: [{ time: now.toLocaleTimeString(), action: user?.role === "Student" ? "Student report filed" : "Incident Created", by: user?.name ?? "Unknown", note: form.immediateDanger ? "Reporter indicated immediate danger." : undefined }],
+      timeline: [
+        {
+          time: now.toLocaleTimeString(),
+          action: isStudent ? "Student report filed" : "Incident Created",
+          by: user?.name ?? "Unknown",
+          note: form.immediateDanger
+            ? "Reporter indicated immediate danger."
+            : undefined,
+        },
+      ],
       comments: [],
     };
-    addIncident(inc);
-    showToast({ type: "success", title: `Incident ${id} created`, message: `${form.type} at ${form.location} — Status: Open` });
+
+    addIncident(newIncident);
+    showToast({
+      type: "success",
+      title: `Incident ${id} created`,
+      message: `${form.type} at ${form.location} — Status: Open`,
+    });
+
     setShowForm(false);
     setForm(emptyForm);
+    setPage(1);
+    clearFilters();
   }
 
-  useEffect(() => {
-    if (!selected) return;
-    const current = incidents.find(incident => incident.id === selected.id);
-    if (current && current !== selected) setSelected(current);
-  }, [incidents, selected]);
-
   function handleStatusChange() {
-    if (!selected) return;
-    updateIncidentStatus(selected.id, newStatus, user?.name ?? "Unknown", statusNote || undefined);
-    setSelected(prev => prev ? { ...prev, status: newStatus, timeline: [...prev.timeline, { time: new Date().toLocaleTimeString(), action: `Status → ${newStatus}`, by: user?.name ?? "Unknown", note: statusNote || undefined }] } : null);
-    showToast({ type: "info", title: `${selected.id} updated`, message: `Status changed to ${newStatus}` });
+    if (!selected || !canModify) return;
+
+    if (newStatus === selected.status && !statusNote.trim()) {
+      showToast({
+        type: "info",
+        title: "No changes made",
+        message: "Choose a different status or add a status note.",
+      });
+      return;
+    }
+
+    updateIncidentStatus(
+      selected.id,
+      newStatus,
+      user?.name ?? "Unknown",
+      statusNote.trim() || undefined,
+    );
+
+    showToast({
+      type: "info",
+      title: `${selected.id} updated`,
+      message: `Status changed to ${newStatus}`,
+    });
+
     setStatusNote("");
   }
 
   function handleReassign() {
-    if (!selected || !newAssignee) return;
+    if (!selected || !newAssignee || !canModify) return;
+
+    if (newAssignee === selected.assigned) {
+      showToast({
+        type: "info",
+        title: "No reassignment needed",
+        message: "This incident is already assigned to that officer.",
+      });
+      return;
+    }
+
     updateIncidentAssignee(selected.id, newAssignee, user?.name ?? "Unknown");
-    setSelected(prev => prev ? { ...prev, assigned: newAssignee } : null);
-    showToast({ type: "info", title: "Incident reassigned", message: `Assigned to ${newAssignee}` });
+
+    showToast({
+      type: "success",
+      title: "Incident reassigned",
+      message: `Assigned to ${newAssignee}`,
+    });
   }
 
   function handleAddComment() {
-    if (!selected || !newComment.trim()) return;
-    addComment(selected.id, user?.name ?? "Unknown", newComment);
-    setSelected(prev => prev ? { ...prev, comments: [...prev.comments, { time: new Date().toLocaleTimeString(), author: user?.name ?? "Unknown", text: newComment }] } : null);
+    const comment = newComment.trim();
+    if (!selected || !comment) return;
+
+    addComment(selected.id, user?.name ?? "Unknown", comment);
     setNewComment("");
   }
 
-  const canModify = user?.role === "Administrator" || user?.role === "Security Officer";
+  const statCards = [
+    { label: "TOTAL REPORTS", value: stats.total, color: "#00d4ff", icon: "▤" },
+    { label: "OPEN", value: stats.open, color: "#f59e0b", icon: "◷" },
+    { label: "IN PROGRESS", value: stats.active, color: "#a78bfa", icon: "◉" },
+    { label: "ACTIVE CRITICAL", value: stats.critical, color: "#ef4444", icon: "!" },
+    { label: "RESOLVED / CLOSED", value: stats.resolved, color: "#10b981", icon: "✓" },
+  ];
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 bg-[#070b14]">
-      <div className="flex items-center justify-between mb-6">
+    <div className="flex-1 min-w-0 overflow-y-auto bg-[#070b14] p-5 lg:p-8">
+      {/* Page header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="font-display text-2xl font-bold text-white tracking-wide">
-            {user?.role === "Student" ? "My Reports" : "Incident Management"}
-          </h1>
-          <p className="text-[#4a6090] text-xs font-mono mt-0.5">{filtered.length} {user?.role === "Student" ? "reports" : "incidents"} · {visibleIncidents.filter(i => i.status === "Open").length} open</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-display text-2xl font-bold text-white tracking-wide">
+              {isStudent ? "My Reports" : "Incident Management"}
+            </h1>
+            <span className="rounded border border-[#00d4ff]/30 bg-[#00d4ff]/10 px-2 py-1 text-[9px] font-mono text-[#00d4ff]">
+              {isStudent ? "REPORTER VIEW" : "OPERATIONS CONSOLE"}
+            </span>
+          </div>
+          <p className="mt-1 text-xs font-mono text-[#647da5]">
+            {filtered.length} matching {isStudent ? "reports" : "incidents"} · {stats.open} currently open
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => exportCSV(filtered)} className="flex items-center gap-2 border border-[#1e3058] text-[#4a6090] hover:text-[#e2eaf8] hover:border-[#2a4580] rounded-lg px-3 py-2 text-xs font-mono transition-colors">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => exportCSV(filtered)}
+            disabled={filtered.length === 0}
+            className="flex items-center gap-2 rounded-lg border border-[#1e3058] px-3 py-2.5 text-xs font-mono text-[#8295b5] transition-colors hover:border-[#2a4580] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export CSV ({filtered.length})
           </button>
-          <button onClick={() => setShowForm(true)} className="btn-primary rounded-lg px-4 py-2.5 text-sm flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+
+          <button
+            onClick={() => setShowForm(true)}
+            className="btn-primary flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
             Report Incident
           </button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
-        <div className="col-span-2 flex items-center gap-2 bg-[#0d1525] border border-[#1e3058] rounded-lg px-3 py-2">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4a6090" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ID, type, location, reporter…" className="bg-transparent text-xs text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono w-full"/>
-        </div>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-[#0d1525] border border-[#1e3058] rounded-lg px-3 py-2 text-xs text-[#e2eaf8] font-mono outline-none" title="From date"/>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-[#0d1525] border border-[#1e3058] rounded-lg px-3 py-2 text-xs text-[#e2eaf8] font-mono outline-none" title="To date"/>
-      </div>
-      <div className="flex flex-wrap gap-2 mb-5">
-        {[
-          { label: "Type", value: typeFilter, set: setTypeFilter, opts: ["All", ...INCIDENT_TYPES] },
-          { label: "Severity", value: sevFilter, set: setSevFilter, opts: ["All", ...SEVERITIES] },
-          { label: "Status", value: statusFilter, set: setStatusFilter, opts: ["All", ...STATUSES] },
-          { label: "Location", value: locationFilter, set: setLocationFilter, opts: ["All", ...LOCATIONS] },
-        ].map(f => (
-          <select key={f.label} value={f.value} onChange={e => f.set(e.target.value)} className="bg-[#0d1525] border border-[#1e3058] rounded-lg px-3 py-2 text-xs text-[#e2eaf8] font-mono outline-none">
-            {f.opts.map(o => <option key={o}>{o}</option>)}
-          </select>
+      {/* Summary cards */}
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        {statCards.map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-xl border border-[#1e3058] bg-[#0d1525] p-4 transition-colors hover:border-[#34517e]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[9px] font-mono tracking-wider text-[#647da5]">
+                {stat.label}
+              </p>
+              <span className="text-sm" style={{ color: stat.color }}>{stat.icon}</span>
+            </div>
+            <p className="mt-2 text-2xl font-bold" style={{ color: stat.color }}>
+              {stat.value.toLocaleString()}
+            </p>
+          </div>
         ))}
-        {(search || typeFilter !== "All" || sevFilter !== "All" || statusFilter !== "All" || locationFilter !== "All" || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(""); setTypeFilter("All"); setSevFilter("All"); setStatusFilter("All"); setLocationFilter("All"); setDateFrom(""); setDateTo(""); }} className="px-3 py-2 text-xs font-mono text-[#ef4444] border border-[#ef4444]/20 rounded-lg hover:bg-[#ef4444]/10 transition-colors">
-            Clear filters
-          </button>
-        )}
       </div>
 
-      {/* Table */}
-      {filtered.length === 0 ? (
-        <div className="bg-[#0d1525] border border-[#1e3058] rounded-xl flex flex-col items-center justify-center py-20">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#2d4a7a" strokeWidth="1.5" className="mb-4"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <p className="font-display font-semibold text-[#2d4a7a]">No incidents match your filters</p>
-          <p className="text-xs font-mono text-[#1e3058] mt-1">Try adjusting search or filter criteria</p>
+      {/* Filters */}
+      <section className="mb-5 rounded-xl border border-[#1e3058] bg-[#0d1525] p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-xs font-bold tracking-wider text-white">SEARCH & FILTERS</h2>
+            <p className="mt-1 text-[10px] font-mono text-[#647da5]">
+              Narrow incidents by category, ownership, status, risk, and date.
+            </p>
+          </div>
+          <button
+            onClick={clearFilters}
+            className="text-[10px] font-mono text-[#00d4ff] transition-colors hover:text-white"
+          >
+            Reset filters ↺
+          </button>
         </div>
-      ) : (
-        <div className="bg-[#0d1525] border border-[#1e3058] rounded-xl overflow-hidden">
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <input
+            value={search}
+            onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+            placeholder="Search ID, description, reporter..."
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+          />
+
+          <select
+            value={typeFilter}
+            onChange={(event) => { setTypeFilter(event.target.value); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          >
+            <option value="All">All incident types</option>
+            {INCIDENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+          </select>
+
+          <select
+            value={severityFilter}
+            onChange={(event) => { setSeverityFilter(event.target.value); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          >
+            <option value="All">All severity levels</option>
+            {SEVERITIES.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          >
+            <option value="All">All statuses</option>
+            {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+          </select>
+
+          <select
+            value={locationFilter}
+            onChange={(event) => { setLocationFilter(event.target.value); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          >
+            <option value="All">All locations</option>
+            {LOCATIONS.map((location) => <option key={location} value={location}>{location}</option>)}
+          </select>
+
+          {!isStudent && (
+            <select
+              value={assigneeFilter}
+              onChange={(event) => { setAssigneeFilter(event.target.value); setPage(1); }}
+              className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+            >
+              <option value="All">All assigned officers</option>
+              {assignees.map((assignee) => <option key={assignee} value={assignee}>{assignee}</option>)}
+            </select>
+          )}
+
+          <input
+            type="date"
+            aria-label="Reported from date"
+            value={dateFrom}
+            onChange={(event) => { setDateFrom(event.target.value); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          />
+
+          <input
+            type="date"
+            aria-label="Reported to date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(event) => { setDateTo(event.target.value); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          />
+
+          <select
+            value={sortOrder}
+            onChange={(event) => { setSortOrder(event.target.value as typeof sortOrder); setPage(1); }}
+            className="rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none"
+          >
+            <option value="newest">Newest reported</option>
+            <option value="oldest">Oldest reported</option>
+            <option value="risk">Highest risk first</option>
+          </select>
+        </div>
+      </section>
+
+      {/* Incident table */}
+      <section className="overflow-hidden rounded-xl border border-[#1e3058] bg-[#0d1525]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1e3058] p-4">
+          <div>
+            <h2 className="text-sm font-bold text-white">Incident Register</h2>
+            <p className="mt-1 text-[10px] font-mono text-[#647da5]">
+              Select a record to inspect its history and available actions.
+            </p>
+          </div>
+          <span className="rounded-md border border-[#1e3058] px-2.5 py-1.5 text-[10px] font-mono text-[#8295b5]">
+            {filtered.length} RECORDS
+          </span>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#34517e" strokeWidth="1.5">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <p className="mt-4 font-display font-semibold text-[#8295b5]">
+              No incidents match your filters
+            </p>
+            <p className="mt-1 text-xs font-mono text-[#4a6090]">
+              Try changing your search or filter criteria.
+            </p>
+            <button onClick={clearFilters} className="mt-4 text-xs text-[#00d4ff] hover:text-white">
+              Clear filters
+            </button>
+          </div>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-[1050px]">
               <thead>
-                <tr className="border-b border-[#1e3058]">
-                  {["ID", "Type", "Location", "Severity", "Status", "Reporter", "Time", "Risk"].map(h => (
-                    <th key={h} className="text-left px-4 py-3 text-[#4a6090] text-xs font-mono uppercase tracking-wider whitespace-nowrap">{h}</th>
+                <tr className="border-b border-[#1e3058] bg-[#101d32]">
+                  {["INCIDENT", "TYPE / LOCATION", "SEVERITY", "STATUS", "REPORTER", "ASSIGNED TO", "REPORTED", "RISK"].map((heading) => (
+                    <th key={heading} className="whitespace-nowrap px-4 py-3 text-left text-[10px] font-mono tracking-wider text-[#647da5]">
+                      {heading}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(inc => (
-                  <tr key={inc.id} onClick={() => { setSelected(inc); setNewStatus(inc.status); setNewAssignee(inc.assigned); }} className="border-b border-[#1e3058]/50 hover:bg-[#111e35] cursor-pointer transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-[#00d4ff] whitespace-nowrap">{inc.id}</td>
-                    <td className="px-4 py-3 text-xs text-[#e2eaf8] whitespace-nowrap max-w-[160px] truncate">{inc.type}</td>
-                    <td className="px-4 py-3 text-xs text-[#4a6090] font-mono whitespace-nowrap max-w-[180px] truncate">{inc.location}</td>
-                    <td className="px-4 py-3 whitespace-nowrap"><span className={`badge badge-${inc.severity.toLowerCase()}`}>{inc.severity}</span></td>
-                    <td className="px-4 py-3 whitespace-nowrap"><span className={`badge badge-${inc.status.toLowerCase()}`}>{inc.status}</span></td>
-                    <td className="px-4 py-3 text-xs text-[#4a6090] whitespace-nowrap max-w-[140px] truncate">{inc.reporter}</td>
-                    <td className="px-4 py-3 text-xs font-mono text-[#4a6090] whitespace-nowrap">{inc.time}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-12 h-1.5 bg-[#1e3058] rounded-full overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${inc.riskScore}%`, background: inc.riskScore >= 76 ? "#ef4444" : inc.riskScore >= 51 ? "#f59e0b" : "#10b981" }}/>
+                {pageIncidents.map((incident) => {
+                  const severityColor = SEVERITY_COLORS[incident.severity];
+
+                  return (
+                    <tr
+                      key={incident.id}
+                      onClick={() => openIncident(incident)}
+                      className="cursor-pointer border-b border-[#1e3058]/60 transition-colors hover:bg-[#142139]"
+                    >
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <p className="font-mono text-xs font-semibold text-[#00d4ff]">{incident.id}</p>
+                        {incident.immediateDanger && (
+                          <span className="mt-1 inline-block text-[9px] font-mono text-[#ef7777]">
+                            IMMEDIATE DANGER
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="max-w-[220px] px-4 py-3">
+                        <p className="truncate text-xs text-[#e2eaf8]">{incident.type}</p>
+                        <p className="mt-1 truncate text-[10px] font-mono text-[#647da5]">
+                          {incident.location}{incident.locationDetail ? ` · ${incident.locationDetail}` : ""}
+                        </p>
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <span
+                          className="rounded border px-2 py-1 text-[10px] font-mono"
+                          style={{
+                            color: severityColor,
+                            background: `${severityColor}12`,
+                            borderColor: `${severityColor}40`,
+                          }}
+                        >
+                          {incident.severity}
+                        </span>
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <span className={`badge badge-${incident.status.toLowerCase()}`}>
+                          {incident.status}
+                        </span>
+                      </td>
+
+                      <td className="max-w-[140px] truncate px-4 py-3 text-xs text-[#8295b5]">
+                        {incident.reporter}
+                      </td>
+
+                      <td className="max-w-[150px] truncate px-4 py-3 text-xs text-[#8295b5]">
+                        {incident.assigned}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 text-[10px] font-mono text-[#647da5]">
+                        {incident.time}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-14 overflow-hidden rounded-full bg-[#1e3058]">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.max(0, Math.min(100, incident.riskScore))}%`,
+                                background: incident.riskScore >= 76
+                                  ? "#ef4444"
+                                  : incident.riskScore >= 51
+                                    ? "#f59e0b"
+                                    : "#10b981",
+                              }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-mono text-[#e2eaf8]">
+                            {incident.riskScore}
+                          </span>
                         </div>
-                        <span className="text-xs font-mono text-[#e2eaf8]">{inc.riskScore}</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Incident Detail Slide-Over */}
+        {/* Pagination */}
+        {filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#1e3058] p-4">
+            <p className="text-[10px] font-mono text-[#647da5]">
+              Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={currentPage <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                className="rounded-lg border border-[#1e3058] px-3 py-2 text-xs text-white transition-colors hover:border-[#00d4ff] disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                ← Previous
+              </button>
+              <span className="px-2 text-[10px] font-mono text-[#8295b5]">
+                {currentPage} / {totalPages}
+              </span>
+              <button
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                className="rounded-lg border border-[#1e3058] px-3 py-2 text-xs text-white transition-colors hover:border-[#00d4ff] disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Incident detail slide-over */}
       {selected && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="flex-1 bg-black/50 backdrop-blur-sm" onClick={() => setSelected(null)} />
-          <div className="w-full max-w-xl bg-[#0d1525] border-l border-[#1e3058] overflow-y-auto animate-slide-in">
-            <div className="sticky top-0 bg-[#0d1525] border-b border-[#1e3058] px-6 py-4 flex items-start justify-between z-10">
+          <button
+            aria-label="Close incident details"
+            className="flex-1 cursor-default bg-black/60 backdrop-blur-sm"
+            onClick={() => setSelected(null)}
+          />
+
+          <aside className="animate-slide-in flex h-full w-full max-w-2xl flex-col overflow-y-auto border-l border-[#1e3058] bg-[#0d1525] shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-[#1e3058] bg-[#0d1525]/95 px-6 py-4 backdrop-blur">
               <div>
-                <p className="font-mono text-[#00d4ff] text-sm">{selected.id}</p>
-                <h2 className="font-display text-xl font-bold text-white mt-0.5">{selected.type}</h2>
+                <p className="font-mono text-sm text-[#00d4ff]">{selected.id}</p>
+                <h2 className="mt-0.5 font-display text-xl font-bold text-white">
+                  {selected.type}
+                </h2>
+                <p className="mt-1 text-[10px] font-mono text-[#647da5]">
+                  Reported {formatDate(selected.time)}
+                </p>
               </div>
-              <button onClick={() => setSelected(null)} className="text-[#4a6090] hover:text-[#e2eaf8] transition-colors mt-1">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <button
+                onClick={() => setSelected(null)}
+                aria-label="Close details"
+                className="rounded-lg p-2 text-[#647da5] transition-colors hover:bg-[#17243b] hover:text-white"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Metadata */}
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { l: "Status", v: <span className={`badge badge-${selected.status.toLowerCase()}`}>{selected.status}</span> },
-                  { l: "Severity", v: <span className={`badge badge-${selected.severity.toLowerCase()}`}>{selected.severity}</span> },
-                  { l: "Location", v: selected.location },
-                  { l: "Exact Location", v: selected.locationDetail || "Not provided" },
-                  { l: "Reporter", v: selected.reporter },
-                  { l: "Assigned To", v: selected.assigned },
-                  { l: "Risk Score", v: <span className="font-mono text-[#f59e0b] font-bold">{selected.riskScore} / 100</span> },
-                  { l: "Time Reported", v: selected.time },
-                  { l: "Time Occurred", v: selected.occurredAt || "Not provided" },
-                  { l: "Evidence", v: selected.evidence || "None" },
-                  { l: "Witnesses", v: selected.witnessInfo || "None reported" },
-                  { l: "Contact Via", v: selected.contactPreference || "Not specified" },
-                  { l: "Immediate Danger", v: selected.immediateDanger ? "Yes — priority response" : "No" },
-                ].map(f => (
-                  <div key={f.l} className="bg-[#070b14] rounded-lg p-3 border border-[#1e3058]">
-                    <p className="text-[#4a6090] text-xs font-mono uppercase mb-1">{f.l}</p>
-                    <div className="text-sm text-[#e2eaf8]">{f.v}</div>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-6 p-5 sm:p-6">
+              {/* Incident overview */}
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-[10px] font-mono tracking-wider text-[#00d4ff]">INCIDENT OVERVIEW</h3>
+                  <span className="text-[10px] font-mono text-[#647da5]">RISK {selected.riskScore}/100</span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {[
+                    ["Status", selected.status],
+                    ["Severity", selected.severity],
+                    ["Location", selected.location],
+                    ["Exact Location", selected.locationDetail || "Not provided"],
+                    ["Reporter", selected.reporter],
+                    ["Reporter Email", selected.reporterEmail || "Not available"],
+                    ["Assigned To", selected.assigned],
+                    ["Time Reported", formatDate(selected.time)],
+                    ["Time Occurred", formatDate(selected.occurredAt)],
+                    ["Contact Preference", selected.contactPreference || "Not specified"],
+                    ["Witnesses", selected.witnessInfo || "None reported"],
+                    ["Evidence Reference", selected.evidence || "None attached"],
+                    ["Immediate Danger", selected.immediateDanger ? "Yes — priority response" : "No"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-[#1e3058] bg-[#070b14] p-3">
+                      <p className="mb-1 text-[9px] font-mono uppercase tracking-wider text-[#647da5]">{label}</p>
+                      <p className="break-words text-xs text-[#e2eaf8]">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
 
               {/* Description */}
-              <div className="bg-[#070b14] rounded-lg p-4 border border-[#1e3058]">
-                <p className="text-[#4a6090] text-xs font-mono uppercase mb-2">Description</p>
-                <p className="text-sm text-[#e2eaf8] leading-relaxed">{selected.description}</p>
-              </div>
+              <section className="rounded-lg border border-[#1e3058] bg-[#070b14] p-4">
+                <h3 className="mb-2 text-[10px] font-mono tracking-wider text-[#00d4ff]">INCIDENT DESCRIPTION</h3>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#d5deed]">
+                  {selected.description}
+                </p>
+              </section>
 
-              {/* Status change — admin/officer only */}
+              {/* Status and assignment controls */}
               {canModify && (
-                <div className="bg-[#070b14] rounded-lg p-4 border border-[#1e3058]">
-                  <p className="text-[#4a6090] text-xs font-mono uppercase mb-3">Update Status</p>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {STATUSES.map(s => (
-                      <button key={s} onClick={() => setNewStatus(s)} className={`badge cursor-pointer ${newStatus === s ? `badge-${s.toLowerCase()}` : "badge-closed opacity-50"}`}>{s}</button>
-                    ))}
-                  </div>
-                  <input value={statusNote} onChange={e => setStatusNote(e.target.value)} placeholder="Note (optional)…" className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2 text-xs text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono mb-2"/>
-                  <button onClick={handleStatusChange} className="btn-primary rounded-lg px-4 py-2 text-xs">Apply Status Change</button>
-                </div>
-              )}
+                <>
+                  <section className="rounded-lg border border-[#1e3058] bg-[#070b14] p-4">
+                    <h3 className="mb-3 text-[10px] font-mono tracking-wider text-[#00d4ff]">UPDATE INCIDENT STATUS</h3>
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {STATUSES.map((status) => (
+                        <button
+                          key={status}
+                          onClick={() => setNewStatus(status)}
+                          className={`rounded-lg border px-3 py-2 text-[10px] font-mono transition-colors ${
+                            newStatus === status
+                              ? "border-[#00d4ff]/50 bg-[#00d4ff]/10 text-[#00d4ff]"
+                              : "border-[#1e3058] text-[#8295b5] hover:border-[#34517e]"
+                          }`}
+                        >
+                          {status}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      value={statusNote}
+                      onChange={(event) => setStatusNote(event.target.value)}
+                      placeholder="Add an audit note for this change (optional)..."
+                      className="mb-3 w-full rounded-lg border border-[#1e3058] bg-[#0a1020] px-3 py-2.5 text-xs text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+                    />
+                    <button
+                      onClick={handleStatusChange}
+                      disabled={newStatus === selected.status && !statusNote.trim()}
+                      className="btn-primary rounded-lg px-4 py-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Apply Status Update
+                    </button>
+                  </section>
 
-              {/* Reassign */}
-              {canModify && (
-                <div className="bg-[#070b14] rounded-lg p-4 border border-[#1e3058]">
-                  <p className="text-[#4a6090] text-xs font-mono uppercase mb-3">Reassign Officer</p>
-                  <div className="flex gap-2">
-                    <select value={newAssignee} onChange={e => setNewAssignee(e.target.value)} className="flex-1 bg-[#0a1020] border border-[#1e3058] rounded-lg px-3 py-2 text-xs text-[#e2eaf8] font-mono outline-none">
-                      <option value="">-- Select Officer --</option>
-                      {OFFICERS.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                    <button onClick={handleReassign} className="btn-primary rounded-lg px-4 py-2 text-xs">Assign</button>
-                  </div>
-                </div>
+                  <section className="rounded-lg border border-[#1e3058] bg-[#070b14] p-4">
+                    <h3 className="mb-3 text-[10px] font-mono tracking-wider text-[#00d4ff]">ASSIGNMENT MANAGEMENT</h3>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <select
+                        value={newAssignee}
+                        onChange={(event) => setNewAssignee(event.target.value)}
+                        className="min-w-0 flex-1 rounded-lg border border-[#1e3058] bg-[#0a1020] px-3 py-2.5 text-xs text-white outline-none"
+                      >
+                        <option value="">Select an officer</option>
+                        <option value="Unassigned">Unassigned</option>
+                        {OFFICERS.map((officer) => (
+                          <option key={officer} value={officer}>{officer}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleReassign}
+                        disabled={!newAssignee || newAssignee === selected.assigned}
+                        className="btn-primary rounded-lg px-4 py-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Assign Officer
+                      </button>
+                    </div>
+                  </section>
+                </>
               )}
 
               {/* Timeline */}
-              <div>
-                <p className="text-[#4a6090] text-xs font-mono uppercase mb-3">Status Timeline</p>
-                <div className="relative">
-                  <div className="absolute left-3 top-0 bottom-0 w-px bg-[#1e3058]" />
-                  <div className="space-y-4 pl-8">
-                    {selected.timeline.map((t, i) => (
-                      <div key={i} className="relative">
-                        <div className="absolute -left-5 top-1 w-2 h-2 rounded-full bg-[#00d4ff] border-2 border-[#0d1525]" />
-                        <p className="text-xs font-semibold text-[#e2eaf8]">{t.action}</p>
-                        <p className="text-xs font-mono text-[#4a6090]">{t.time} · {t.by}</p>
-                        {t.note && <p className="text-xs text-[#a78bfa] mt-0.5 italic">{t.note}</p>}
-                      </div>
-                    ))}
+              <section>
+                <h3 className="mb-4 text-[10px] font-mono tracking-wider text-[#00d4ff]">INCIDENT ACTIVITY TIMELINE</h3>
+                {selected.timeline.length === 0 ? (
+                  <p className="text-xs text-[#647da5]">No timeline events recorded.</p>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute bottom-2 left-[7px] top-2 w-px bg-[#1e3058]" />
+                    <div className="space-y-5">
+                      {selected.timeline.map((event, index) => (
+                        <div key={`${event.time}-${index}`} className="relative flex gap-4">
+                          <span className="z-[1] mt-1.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-[#00d4ff] bg-[#0d1525]" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[#e2eaf8]">{event.action}</p>
+                            <p className="mt-1 text-[10px] font-mono text-[#647da5]">
+                              {event.time} · {event.by}
+                            </p>
+                            {event.note && (
+                              <p className="mt-1 text-xs italic text-[#a78bfa]">{event.note}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </div>
+                )}
+              </section>
 
               {/* Comments */}
-              <div>
-                <p className="text-[#4a6090] text-xs font-mono uppercase mb-3">Notes & Comments</p>
-                <div className="space-y-3 mb-3">
-                  {selected.comments.length === 0 && <p className="text-xs text-[#2d4a7a] font-mono">No comments yet.</p>}
-                  {selected.comments.map((c, i) => (
-                    <div key={i} className="bg-[#070b14] rounded-lg p-3 border border-[#1e3058]">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-semibold text-[#e2eaf8]">{c.author}</span>
-                        <span className="text-xs font-mono text-[#4a6090]">{c.time}</span>
+              <section>
+                <h3 className="mb-3 text-[10px] font-mono tracking-wider text-[#00d4ff]">NOTES & COMMENTS</h3>
+                <div className="mb-3 space-y-2">
+                  {selected.comments.length === 0 && (
+                    <p className="text-xs text-[#647da5]">No comments have been added yet.</p>
+                  )}
+                  {selected.comments.map((comment, index) => (
+                    <div key={`${comment.time}-${index}`} className="rounded-lg border border-[#1e3058] bg-[#070b14] p-3">
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-[#e2eaf8]">{comment.author}</span>
+                        <span className="text-[10px] font-mono text-[#647da5]">{comment.time}</span>
                       </div>
-                      <p className="text-xs text-[#e2eaf8]">{c.text}</p>
+                      <p className="whitespace-pre-wrap break-words text-xs text-[#c5d1e5]">{comment.text}</p>
                     </div>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddComment()} placeholder="Add a note…" className="flex-1 bg-[#070b14] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2 text-xs text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono"/>
-                  <button onClick={handleAddComment} className="btn-primary rounded-lg px-3 py-2 text-xs">Post</button>
+                  <input
+                    value={newComment}
+                    onChange={(event) => setNewComment(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") handleAddComment();
+                    }}
+                    placeholder="Add an internal note or update..."
+                    className="min-w-0 flex-1 rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+                  />
+                  <button
+                    onClick={handleAddComment}
+                    disabled={!newComment.trim()}
+                    className="btn-primary rounded-lg px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Post
+                  </button>
                 </div>
-              </div>
+              </section>
+
+              <button
+                onClick={() => setSelected(null)}
+                className="w-full rounded-lg border border-[#1e3058] py-2.5 text-xs text-[#8295b5] transition-colors hover:border-[#34517e] hover:text-white"
+              >
+                Close incident details
+              </button>
             </div>
-          </div>
+          </aside>
         </div>
       )}
 
-      {/* New Incident Modal */}
+      {/* New incident modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-[#0d1525] border border-[#1e3058] rounded-2xl p-6 w-full max-w-lg animate-fade-up" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setShowForm(false)}
+        >
+          <div
+            className="animate-fade-up max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#1e3058] bg-[#0d1525] p-5 shadow-2xl sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-5 flex items-start justify-between gap-3">
               <div>
-                <h2 className="font-display text-xl font-bold text-white">{user?.role === "Student" ? "File a Safety Report" : "Report Incident"}</h2>
-                <p className="text-xs font-mono text-[#4a6090] mt-0.5">Reporting as {user?.name} · All required fields are marked</p>
+                <h2 className="font-display text-xl font-bold text-white">
+                  {isStudent ? "File a Safety Report" : "Report Incident"}
+                </h2>
+                <p className="mt-1 text-xs font-mono text-[#647da5]">
+                  Reporting as {user?.name ?? "Unknown"} · Required fields marked *
+                </p>
               </div>
-              <button onClick={() => setShowForm(false)} className="text-[#4a6090] hover:text-[#e2eaf8]">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <button
+                onClick={() => setShowForm(false)}
+                aria-label="Close form"
+                className="rounded-lg p-2 text-[#647da5] hover:bg-[#17243b] hover:text-white"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Incident Type *</label>
-                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] outline-none font-mono">
-                  {INCIDENT_TYPES.map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Location *</label>
-                <select value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] outline-none font-mono">
-                  {LOCATIONS.map(l => <option key={l}>{l}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Exact Location *</label>
-                  <input value={form.locationDetail} onChange={e => setForm(f => ({ ...f, locationDetail: e.target.value }))} placeholder="Room, floor, landmark…" className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono"/>
+                  <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Incident Type *</label>
+                  <select
+                    value={form.type}
+                    onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}
+                    className="w-full rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none focus:border-[#00d4ff]"
+                  >
+                    {INCIDENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
                 </div>
+
                 <div>
-                  <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">When It Happened *</label>
-                  <input type="datetime-local" max={new Date().toISOString().slice(0, 16)} value={form.occurredAt} onChange={e => setForm(f => ({ ...f, occurredAt: e.target.value }))} className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] outline-none font-mono"/>
-                </div>
-              </div>
-              <div>
-                <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Description *</label>
-                <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Describe what happened, when, and any relevant details…" rows={3} className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono resize-none"/>
-              </div>
-              <div>
-                <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Severity {user?.role === "Student" ? "(best estimate)" : "(auto-suggested)"}</label>
-                <div className="flex gap-2">
-                  {SEVERITIES.map(s => (
-                    <button key={s} onClick={() => setForm(f => ({ ...f, severity: s }))} className={`badge cursor-pointer flex-1 justify-center py-2 ${form.severity === s ? `badge-${s.toLowerCase()}` : "badge-closed opacity-40"}`}>{s}</button>
-                  ))}
-                </div>
-              </div>
-              <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${form.immediateDanger ? "bg-[#ef4444]/10 border-[#ef4444]/30" : "bg-[#0a1020] border-[#1e3058]"}`}>
-                <input type="checkbox" checked={form.immediateDanger} onChange={e => setForm(f => ({ ...f, immediateDanger: e.target.checked }))} className="mt-0.5 accent-[#ef4444]"/>
-                <span>
-                  <span className="block text-sm font-semibold text-[#e2eaf8]">Immediate danger or medical help needed</span>
-                  <span className="block text-xs text-[#4a6090] mt-0.5">For an active emergency, call campus security at ext. 9999 first.</span>
-                </span>
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Witnesses (optional)</label>
-                  <input value={form.witnessInfo} onChange={e => setForm(f => ({ ...f, witnessInfo: e.target.value }))} placeholder="Name or contact detail…" className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono"/>
-                </div>
-                <div>
-                  <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Contact Preference</label>
-                  <select value={form.contactPreference} onChange={e => setForm(f => ({ ...f, contactPreference: e.target.value as NonNullable<Incident["contactPreference"]> }))} className="w-full bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] outline-none font-mono">
-                    <option>In-app updates</option><option>Email</option><option>Phone</option>
+                  <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Location *</label>
+                  <select
+                    value={form.location}
+                    onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+                    className="w-full rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none focus:border-[#00d4ff]"
+                  >
+                    {LOCATIONS.map((location) => <option key={location} value={location}>{location}</option>)}
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="text-[#4a6090] text-xs font-mono uppercase block mb-1">Evidence / Reference (optional)</label>
-                <div className="flex gap-2">
-                  <input value={form.evidence} onChange={e => setForm(f => ({ ...f, evidence: e.target.value }))} placeholder="Camera ID, sensor ref, document…" className="flex-1 bg-[#0a1020] border border-[#1e3058] focus:border-[#00d4ff] rounded-lg px-3 py-2.5 text-sm text-[#e2eaf8] placeholder-[#2d4a7a] outline-none font-mono"/>
-                  <label className="border border-[#1e3058] text-[#4a6090] rounded-lg px-3 flex items-center hover:border-[#2a4580] transition-colors text-xs font-mono cursor-pointer">
-                    Attach
-                    <input type="file" className="hidden" accept="image/*,.pdf,.txt" onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) setForm(f => ({ ...f, evidence: file.name }));
-                    }}/>
-                  </label>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Exact Location *</label>
+                  <input
+                    value={form.locationDetail}
+                    onChange={(event) => setForm((current) => ({ ...current, locationDetail: event.target.value }))}
+                    placeholder="Room, floor, landmark, zone..."
+                    className="w-full rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">When It Happened *</label>
+                  <input
+                    type="datetime-local"
+                    max={new Date().toISOString().slice(0, 16)}
+                    value={form.occurredAt}
+                    onChange={(event) => setForm((current) => ({ ...current, occurredAt: event.target.value }))}
+                    className="w-full rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none focus:border-[#00d4ff]"
+                  />
                 </div>
               </div>
+
+              <div>
+                <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Description * (minimum 20 characters)</label>
+                <textarea
+                  value={form.description}
+                  onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="Describe what happened, when it happened, and any relevant details..."
+                  rows={4}
+                  className="w-full resize-y rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs leading-relaxed text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+                />
+                <p className="mt-1 text-right text-[10px] font-mono text-[#647da5]">
+                  {form.description.trim().length} / 20 minimum
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[10px] font-mono uppercase text-[#8295b5]">Severity estimate</label>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {SEVERITIES.map((severity) => {
+                    const color = SEVERITY_COLORS[severity];
+                    const active = form.severity === severity;
+
+                    return (
+                      <button
+                        key={severity}
+                        type="button"
+                        onClick={() => setForm((current) => ({ ...current, severity }))}
+                        className="rounded-lg border px-3 py-2.5 text-xs font-mono transition-colors"
+                        style={{
+                          color: active ? color : "#8295b5",
+                          borderColor: active ? `${color}70` : "#1e3058",
+                          background: active ? `${color}12` : "#070b14",
+                        }}
+                      >
+                        {severity}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                form.immediateDanger
+                  ? "border-[#ef4444]/40 bg-[#ef4444]/10"
+                  : "border-[#1e3058] bg-[#070b14]"
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={form.immediateDanger}
+                  onChange={(event) => setForm((current) => ({ ...current, immediateDanger: event.target.checked }))}
+                  className="mt-0.5 accent-red-500"
+                />
+                <span>
+                  <span className="block text-xs font-semibold text-white">Immediate danger or medical help needed</span>
+                  <span className="mt-1 block text-[10px] text-[#8295b5]">
+                    This marks the report as Critical. For an active emergency, contact campus security immediately.
+                  </span>
+                </span>
+              </label>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Witnesses (optional)</label>
+                  <input
+                    value={form.witnessInfo}
+                    onChange={(event) => setForm((current) => ({ ...current, witnessInfo: event.target.value }))}
+                    placeholder="Names or relevant details..."
+                    className="w-full rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Contact Preference</label>
+                  <select
+                    value={form.contactPreference}
+                    onChange={(event) => setForm((current) => ({
+                      ...current,
+                      contactPreference: event.target.value as NonNullable<Incident["contactPreference"]>,
+                    }))}
+                    className="w-full rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none focus:border-[#00d4ff]"
+                  >
+                    <option>In-app updates</option>
+                    <option>Email</option>
+                    <option>Phone</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-[10px] font-mono uppercase text-[#8295b5]">Evidence / Reference (optional)</label>
+                <div className="flex gap-2">
+                  <input
+                    value={form.evidence}
+                    onChange={(event) => setForm((current) => ({ ...current, evidence: event.target.value }))}
+                    placeholder="Camera ID, sensor reference, document..."
+                    className="min-w-0 flex-1 rounded-lg border border-[#1e3058] bg-[#070b14] px-3 py-2.5 text-xs text-white outline-none placeholder:text-[#40577d] focus:border-[#00d4ff]"
+                  />
+                  <label className="cursor-pointer rounded-lg border border-[#1e3058] px-3 py-2.5 text-xs text-[#8295b5] transition-colors hover:border-[#34517e] hover:text-white">
+                    Attach
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*,.pdf,.txt"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          setForm((current) => ({
+                            ...current,
+                            evidence: file.name,
+                          }));
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="mt-1 text-[10px] text-[#647da5]">
+                  This records the selected filename only; it does not upload the file to a server.
+                </p>
+              </div>
             </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={handleSubmitIncident} className="btn-primary flex-1 rounded-lg py-2.5 text-sm">Submit Incident</button>
-              <button onClick={() => setShowForm(false)} className="flex-1 border border-[#1e3058] text-[#4a6090] rounded-lg py-2.5 text-sm hover:border-[#2a4580] transition-colors">Cancel</button>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row">
+              <button
+                onClick={() => setShowForm(false)}
+                className="flex-1 rounded-lg border border-[#1e3058] py-2.5 text-xs text-[#8295b5] transition-colors hover:border-[#34517e] hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitIncident}
+                disabled={
+                  !form.occurredAt ||
+                  !form.locationDetail.trim() ||
+                  form.description.trim().length < 20
+                }
+                className="btn-primary flex-1 rounded-lg py-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Submit Incident Report
+              </button>
             </div>
           </div>
         </div>
