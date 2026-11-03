@@ -1,46 +1,190 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin, type PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import siteConfiguration from './.figma/make/site.json'
-export default defineConfig(({ mode }) => {
-  const emitSourcemaps = mode === 'development'
+
+export default defineConfig(async ({ mode, command }) => {
+  // Load every env var (not only VITE_-prefixed ones) for use inside this config only.
+  const env = loadEnv(mode, process.cwd(), '')
+  const isDev = mode === 'development'
+  const isProd = command === 'build' && !isDev
+  const emitSourcemaps = isDev || env.SOURCEMAP === 'true'
+  const port = parseInt(env.PORT || '8443')
+  const host = env.FIGMA_DEV_SERVER_HOST || '0.0.0.0'
+
+  const plugins: PluginOption[] = [
+    react(),
+    tailwindcss(),
+    figmaSiteConfiguration(siteConfiguration),
+    figmaErrorOverlayReplay(),
+    figmaReactRefreshBoundaryFallback(),
+    figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
+    securityHeaders(),
+    buildInfo({ commit: env.GIT_COMMIT || env.VERCEL_GIT_COMMIT_SHA || env.GITHUB_SHA }),
+  ]
+
+  // Optional bundle report: ANALYZE=true npm run build (needs `npm i -D rollup-plugin-visualizer`)
+  if (env.ANALYZE === 'true') {
+    try {
+      const { visualizer } = await import('rollup-plugin-visualizer')
+      plugins.push(
+        visualizer({ filename: 'dist/stats.html', gzipSize: true, brotliSize: true, open: false }) as PluginOption,
+      )
+    } catch {
+      console.warn('[vite] ANALYZE=true but rollup-plugin-visualizer is not installed; skipping.')
+    }
+  }
+
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
-    build: {
-      sourcemap: emitSourcemaps ? 'inline' : false,
-      minify: !emitSourcemaps,
-    },
-    plugins: [
-      react(),
-      tailwindcss(),
-      figmaSiteConfiguration(siteConfiguration),
-      figmaErrorOverlayReplay(),
-      figmaReactRefreshBoundaryFallback(),
-      figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
-    ],
+
+    plugins,
+
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './src'),
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
+      // Prevent duplicate React copies from linked or hoisted packages.
+      dedupe: ['react', 'react-dom'],
+    },
+
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
+
+    css: {
+      devSourcemap: isDev,
+    },
+
+    esbuild: {
+      // Strip debugging noise from production bundles.
+      drop: isProd ? ['debugger'] : [],
+      pure: isProd ? ['console.log', 'console.debug'] : [],
+      legalComments: 'none',
+    },
+
+    optimizeDeps: {
+      // Pre-bundle heavy deps up front so the first dev load isn't followed by a reload.
+      include: ['react', 'react-dom', 'react-dom/client'],
+    },
+
+    build: {
+      target: 'es2022',
+      sourcemap: emitSourcemaps ? (isDev ? 'inline' : true) : false,
+      minify: !isDev,
+      cssCodeSplit: true,
+      assetsInlineLimit: 4096,
+      chunkSizeWarningLimit: 700,
+      reportCompressedSize: true,
+      rollupOptions: {
+        output: {
+          // Split stable vendor code so app changes don't bust the whole cache.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react-vendor'
+            if (/[\\/]node_modules[\\/](react-router|react-router-dom|@remix-run)[\\/]/.test(id)) return 'router'
+            if (/[\\/]node_modules[\\/](@radix-ui|lucide-react|cmdk|vaul|sonner)[\\/]/.test(id)) return 'ui-vendor'
+            if (/[\\/]node_modules[\\/](motion|framer-motion)[\\/]/.test(id)) return 'motion'
+            if (/[\\/]node_modules[\\/](recharts|d3-[^\\/]+)[\\/]/.test(id)) return 'charts'
+            return undefined
+          },
+          chunkFileNames: 'assets/js/[name]-[hash].js',
+          entryFileNames: 'assets/js/[name]-[hash].js',
+          assetFileNames: ({ name }) => {
+            const ext = name?.split('.').pop() ?? ''
+            if (/png|jpe?g|svg|gif|webp|avif|ico/i.test(ext)) return 'assets/img/[name]-[hash][extname]'
+            if (/woff2?|ttf|otf|eot/i.test(ext)) return 'assets/fonts/[name]-[hash][extname]'
+            if (ext === 'css') return 'assets/css/[name]-[hash][extname]'
+            return 'assets/[name]-[hash][extname]'
+          },
+        },
       },
     },
+
     server: {
-      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
+      host,
+      port,
       strictPort: true,
+      // Optional API proxy: set API_PROXY_TARGET=https://api.example.com to forward /api in dev.
+      proxy: env.API_PROXY_TARGET
+        ? {
+            '/api': {
+              target: env.API_PROXY_TARGET,
+              changeOrigin: true,
+              secure: false,
+              rewrite: (p: string) => p.replace(/^\/api/, ''),
+            },
+          }
+        : undefined,
+      warmup: {
+        clientFiles: ['./src/main.tsx', './src/App.tsx'],
+      },
       watch: {
-        ignored: [
-          '**/.figma/**',
-],
+        ignored: ['**/.figma/**'],
       },
     },
+
     preview: {
-      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
+      host,
+      port,
     },
   }
 })
+
+/* -------------------------------------------------------------------------- */
+/*  Custom plugins                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Adds baseline security headers to the dev and preview servers. */
+function securityHeaders(): Plugin {
+  const headers: Record<string, string> = {
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  }
+  const middleware = (_req: unknown, res: { setHeader(k: string, v: string): void }, next: () => void) => {
+    for (const [key, value] of Object.entries(headers)) res.setHeader(key, value)
+    next()
+  }
+
+  return {
+    name: 'security-headers',
+    configureServer(server) {
+      server.middlewares.use(middleware as never)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware as never)
+    },
+  }
+}
+
+/** Emits /version.json at build time so deployed builds can be identified and polled for updates. */
+function buildInfo(options: { commit?: string }): Plugin {
+  const info = {
+    version: process.env.npm_package_version ?? '0.0.0',
+    commit: options.commit ?? null,
+    builtAt: new Date().toISOString(),
+  }
+
+  return {
+    name: 'build-info',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify(info, null, 2),
+      })
+    },
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Figma plugins                                                             */
+/* -------------------------------------------------------------------------- */
 
 type FigmaSiteConfiguration = {
   title?: string
@@ -78,10 +222,11 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
     return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   }
   function replaceHtmlCommentSlot(html: string, slotName: string, content: string): string {
-    return html.replace(`<!-- ${slotName} -->`, content)
+    // Function replacer so "$&" and similar sequences in user content are not interpreted.
+    return html.replace(`<!-- ${slotName} -->`, () => content)
   }
 
-  const title = config.title ?? "Figma Make App"
+  const title = config.title ?? 'Figma Make App'
   const description = config.description ?? ''
   const favicon = config.icons?.icon ?? ''
   const socialImage = config.openGraph?.image ?? ''
@@ -91,7 +236,8 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
   const headEnd = config.customScripts?.headEnd ?? ''
   const bodyStart = config.customScripts?.bodyStart ?? ''
   const bodyEnd = config.customScripts?.bodyEnd ?? ''
-  const robotsTxt = config.robots?.index === false ? 'User-agent: *\nDisallow: /\n' : ''
+  const noIndex = config.robots?.index === false
+  const robotsTxt = noIndex ? 'User-agent: *\nDisallow: /\n' : ''
 
   return {
     name: 'figma-site-configuration',
@@ -127,7 +273,7 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
         if (description) {
           tags.push({ tag: 'meta', attrs: { name: 'description', content: description }, injectTo: 'head' })
         }
-        if (config.robots?.index === false) {
+        if (noIndex) {
           tags.push({ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' }, injectTo: 'head' })
         }
         if (favicon) {
@@ -212,7 +358,7 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
   }
 }
 
-
+/** Re-sends the last compile error to newly connected clients so the overlay survives reloads. */
 function figmaErrorOverlayReplay(): Plugin {
   return {
     name: 'figma-error-overlay-replay',
@@ -241,6 +387,9 @@ function figmaErrorOverlayReplay(): Plugin {
       })
     },
   }
+}
+
+/** Forces a full reload when a module loses its React Refresh boundary (e.g. a component export was removed). */
 function figmaReactRefreshBoundaryFallback(): Plugin {
   const hadRefreshBoundary = new Map<string, boolean>()
   let sendFullReload: (() => void) | null = null
@@ -269,6 +418,7 @@ function figmaReactRefreshBoundaryFallback(): Plugin {
   }
 }
 
+/** Serves a virtual story index at /.figma/make/kit.html for Figma Make's component kit. */
 function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin {
   const storiesGlob = Array.isArray(options.storiesGlob) ? options.storiesGlob : [options.storiesGlob]
   const ROUTE = '/.figma/make/kit.html'
